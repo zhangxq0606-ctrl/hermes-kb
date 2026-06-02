@@ -1,11 +1,12 @@
 .syncthing/
 nssm/
-kb/cloudflared/
+kb/cloudflared*
 kb/logs/
 kb/models/
 kb/__pycache__/
 kb/api/__pycache__/
 kb/scripts/__pycache__/
+public/
 *.pyc
 *.log
 .DS_Store
