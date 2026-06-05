@@ -3,6 +3,7 @@ import sys
 import json
 import time
 import hashlib
+import uuid
 import urllib.request
 import urllib.error
 
@@ -41,7 +42,40 @@ def _get_deepseek_config():
     return api_key, base_url, model
 
 
-SYSTEM_PROMPT = "你是一个知识库助手。基于以下检索到的文档回答用户问题。如果文档中没有相关信息，明确告知用户。"
+SYSTEM_PROMPT = """你是 Xq.KB 知识库助手。基于检索到的文档回答用户问题。
+规则：
+- 如果文档内容足以回答问题，直接回答并在末尾标注引用的文档来源
+- 如果部分相关但不完整，先回答已知部分，再告知缺失什么
+- 如果文档与问题完全无关或为空，明确说"知识库中暂无相关内容"，不要编造
+- 回答简洁直接，不铺垫背景，不重复问题
+- 中文回答，专业术语保留原文"""
+
+
+class SessionManager:
+    _sessions = {}
+    _MAX_MESSAGES = 20
+
+    @classmethod
+    def create_session(cls):
+        session_id = uuid.uuid4().hex[:8]
+        cls._sessions[session_id] = []
+        return session_id
+
+    @classmethod
+    def get_history(cls, session_id):
+        return cls._sessions.get(session_id, [])
+
+    @classmethod
+    def add_message(cls, session_id, role, content):
+        if session_id not in cls._sessions:
+            cls._sessions[session_id] = []
+        cls._sessions[session_id].append({"role": role, "content": content})
+        if len(cls._sessions[session_id]) > cls._MAX_MESSAGES:
+            cls._sessions[session_id] = cls._sessions[session_id][2:]
+
+    @classmethod
+    def clear_session(cls, session_id):
+        cls._sessions.pop(session_id, None)
 
 _ANSWER_CACHE = {}
 _CACHE_TTL = 300
@@ -49,6 +83,38 @@ _CACHE_TTL = 300
 
 def _cache_key(question):
     return hashlib.sha256(question.strip().encode("utf-8")).hexdigest()
+
+
+def _extract_title(filepath):
+    """读取文件第一行 # 标题，失败返回文件名"""
+    try:
+        with open(filepath, "r", encoding="utf-8") as f:
+            for line in f:
+                stripped = line.strip()
+                if stripped.startswith("# "):
+                    return stripped[2:].strip()
+    except Exception:
+        pass
+    name = os.path.basename(filepath).replace(".md", "")
+    if name.endswith("_refined"):
+        name = name[:-8]
+    return name
+
+
+def _section_label(rel_path):
+    """将相对路径映射为分类标签"""
+    mapping = {
+        "core/insight": "洞察",
+        "core/note": "笔记",
+        "core/question": "问题",
+        "manual/technical": "技术手册",
+    }
+    normalized = rel_path.replace("\\", "/")
+    for prefix, label in mapping.items():
+        if normalized.startswith(prefix + "/") or normalized == prefix:
+            return label
+    parts = normalized.split("/")
+    return parts[0] if parts else rel_path
 
 
 def _get_cached(question):
@@ -125,14 +191,14 @@ def ask(question):
 
     api_key, base_url, model = _get_deepseek_config()
 
-    results = semantic_index.search(question, top_k=5)
+    results = semantic_index.search(question, top_k=3)
     if not results:
         return {"answer": "没有找到相关文档，无法回答此问题。", "sources": []}
 
     sources = []
     doc_parts = []
 
-    for rel_path, score in results:
+    for rel_path, score, mtime in results:
         full_path = os.path.join(BASE_DIR, rel_path)
         try:
             with open(full_path, "r", encoding="utf-8") as f:
@@ -140,7 +206,10 @@ def ask(question):
         except Exception:
             continue
         doc_parts.append(f"【文档 {len(doc_parts) + 1}】{rel_path}\n{content}")
-        sources.append(rel_path)
+        title = _extract_title(full_path)
+        section = _section_label(rel_path)
+        mtime_str = time.strftime("%Y-%m-%d", time.localtime(mtime)) if mtime else ""
+        sources.append({"path": rel_path, "title": title, "section": section, "mtime": mtime_str})
 
     if not doc_parts:
         return {"answer": "无法读取相关文档内容。", "sources": []}
@@ -168,7 +237,7 @@ def ask_stream(question):
 
     api_key, base_url, model = _get_deepseek_config()
 
-    results = semantic_index.search(question, top_k=5)
+    results = semantic_index.search(question, top_k=3)
     if not results:
         yield json.dumps({"type": "error", "message": "没有找到相关文档，无法回答此问题。"})
         return
@@ -176,7 +245,7 @@ def ask_stream(question):
     sources = []
     doc_parts = []
 
-    for rel_path, score in results:
+    for rel_path, score, mtime in results:
         full_path = os.path.join(BASE_DIR, rel_path)
         try:
             with open(full_path, "r", encoding="utf-8") as f:
@@ -184,7 +253,10 @@ def ask_stream(question):
         except Exception:
             continue
         doc_parts.append(f"【文档 {len(doc_parts) + 1}】{rel_path}\n{content}")
-        sources.append(rel_path)
+        title = _extract_title(full_path)
+        section = _section_label(rel_path)
+        mtime_str = time.strftime("%Y-%m-%d", time.localtime(mtime)) if mtime else ""
+        sources.append({"path": rel_path, "title": title, "section": section, "mtime": mtime_str})
 
     if not doc_parts:
         yield json.dumps({"type": "error", "message": "无法读取相关文档内容。"})
@@ -205,6 +277,66 @@ def ask_stream(question):
 
     _set_cache(question, full_answer, sources)
     yield json.dumps({"type": "done"})
+
+
+def chat(question, session_id=None):
+    if session_id is None or session_id not in SessionManager._sessions:
+        session_id = SessionManager.create_session()
+
+    api_key, base_url, model = _get_deepseek_config()
+
+    results = semantic_index.search(question, top_k=3)
+
+    sources = []
+    doc_parts = []
+
+    for rel_path, score, mtime in results:
+        full_path = os.path.join(BASE_DIR, rel_path)
+        try:
+            with open(full_path, "r", encoding="utf-8") as f:
+                content = f.read()
+        except Exception:
+            continue
+        mtime_str = time.strftime("%Y-%m-%d", time.localtime(mtime)) if mtime else ""
+        doc_parts.append(f"【文档 {len(doc_parts) + 1} - {mtime_str}】{rel_path}\n{content}")
+        title = _extract_title(full_path)
+        section = _section_label(rel_path)
+        sources.append({"path": rel_path, "title": title, "section": section, "mtime": mtime_str})
+
+    history = SessionManager.get_history(session_id)
+
+    if doc_parts:
+        user_content = "\n\n---\n\n".join(doc_parts) + f"\n\n问题：{question}"
+    else:
+        user_content = f"问题：{question}"
+
+    chat_system = SYSTEM_PROMPT + "\n\n" + (
+        "演进检测规则：当检索到的文档中存在同一主题但不同时期的内容时，请执行：\n"
+        "1. 对比各文档的核心观点，识别是否发生了变化\n"
+        "2. 如果观点一致，正常回答即可，无需标注\n"
+        "3. 如果观点存在明显的递进/修正/反转，在回答末尾用分隔线列出演进轨迹：\n"
+        "   ---\n"
+        "   观点变化轨迹：\n"
+        "   - [日期]：原观点摘要\n"
+        "   - [日期]：新观点摘要\n"
+        "   变化类型：[递进 / 修正 / 反转]\n"
+        "4. 如果变化程度较大（修正或反转），末尾追加：\n"
+        "   ---\n"
+        "   该主题观点存在较大变化。是否需要整合成一篇更新后的笔记？"
+    )
+
+    messages = [
+        {"role": "system", "content": chat_system},
+    ] + history + [
+        {"role": "user", "content": user_content},
+    ]
+
+    answer = _call_deepseek(api_key, base_url, model, messages)
+
+    SessionManager.add_message(session_id, "user", question)
+    SessionManager.add_message(session_id, "assistant", answer)
+
+    return {"answer": answer, "sources": sources, "session_id": session_id}
 
 
 if __name__ == "__main__":

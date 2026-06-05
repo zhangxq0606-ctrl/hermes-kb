@@ -6,9 +6,13 @@ import json
 import hashlib
 import logging
 import urllib.request
+import concurrent.futures
+import time
 from datetime import datetime, timezone, timedelta
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "api"))
+import semantic_index
 from env_loader import load_dotenv
 
 load_dotenv()
@@ -66,32 +70,59 @@ def save_retry_state(state):
         json.dump(state, f, ensure_ascii=False, indent=2)
 
 
-def collect_background_context():
+_context_cache = {}
+_context_cache_time = {}
+
+
+def collect_background_context(content):
+    global _context_cache, _context_cache_time
+    cache_key = hashlib.md5(content.encode()).hexdigest()
+    if cache_key in _context_cache and time.time() - _context_cache_time.get(cache_key, 0) < 300:
+        return _context_cache[cache_key]
+
+    results = semantic_index.search(content, top_k=8, min_score=0.3)
+    if not results:
+        _context_cache[cache_key] = ""
+        _context_cache_time[cache_key] = time.time()
+        return ""
+
+    PATH_LABELS = {
+        "core/insight": "软智慧/洞察",
+        "core/note": "软智慧/灵感",
+        "manual/technical": "硬知识",
+    }
+
+    groups = {}
+    for rel_path, score, mtime in results:
+        dir_key = "/".join(rel_path.replace("\\", "/").split("/")[:2])
+        label = PATH_LABELS.get(dir_key, dir_key)
+        full_path = os.path.join(BASE_DIR, rel_path)
+        try:
+            with open(full_path, "r", encoding="utf-8", errors="replace") as f:
+                text = f.read()
+            title_match = re.search(r"^#\s*(.+)$", text, re.MULTILINE)
+            title = title_match.group(1).strip() if title_match else os.path.basename(rel_path).replace("_refined.md", "")
+            clean = re.sub(r"^#.*", "", text, flags=re.MULTILINE).strip()
+            summary = clean[:120].replace("\n", " ").strip()
+            name_no_ext = os.path.basename(rel_path).replace("_refined.md", "")
+            groups.setdefault(label, []).append(f"{len(groups.get(label, []))+1}. {title} | {name_no_ext} | {summary}")
+        except Exception:
+            pass
+
+    if not groups:
+        _context_cache[cache_key] = ""
+        _context_cache_time[cache_key] = time.time()
+        return ""
+
     parts = []
-    scan_dirs = [CORE_INSIGHT, CORE_NOTE]
-    for scan_dir in scan_dirs:
-        if not os.path.isdir(scan_dir):
-            continue
-        for entry in sorted(os.listdir(scan_dir)):
-            if not entry.endswith("_refined.md"):
-                continue
-            fp = os.path.join(scan_dir, entry)
-            try:
-                with open(fp, "r", encoding="utf-8", errors="replace") as f:
-                    text = f.read()
-                title_match = re.search(r"^#\s*(.+)$", text, re.MULTILINE)
-                title = title_match.group(1).strip() if title_match else entry.replace("_refined.md", "")
-                clean = re.sub(r"^#.*", "", text, flags=re.MULTILINE).strip()
-                summary = clean[:120].replace("\n", " ").strip()
-                name_no_ext = entry.replace("_refined.md", "")
-                parts.append(f"{len(parts)+1}. {title}（{name_no_ext}.md）: {summary}")
-                if len(parts) >= 15:
-                    break
-            except Exception:
-                pass
-        if len(parts) >= 15:
-            break
-    return "\n".join(parts) if parts else ""
+    for label in ["软智慧/洞察", "软智慧/灵感", "硬知识"]:
+        if label in groups:
+            parts.append(f"【{label}】")
+            parts.extend(groups[label])
+    result = "\n".join(parts)
+    _context_cache[cache_key] = result
+    _context_cache_time[cache_key] = time.time()
+    return result
 
 
 URL_PATTERN = re.compile(r'https?://[^\s<>"{}|\\^`\[\]]+')
@@ -162,13 +193,21 @@ def _fetch_dedao_article(html):
 SYSTEM_PROMPT = """你是知识碎片分类引擎。评估用户输入的笔记，完成分类与打分。
 
 分类标准（knowledge_type）：
-- hard: 硬知识。工具、API、命令、纯代码、配置、操作步骤。显性、工具型。
+- hard: 硬知识。工具、API、命令、代码、配置、操作步骤、工具介绍与评测、安装教程。显性、工具型。
+  规则：推荐/评测类文章，只要核心价值是"介绍工具或方法"，即使包含使用体验评价也归为 hard。
 - soft: 软智慧。商业判断、人生方法论、投资理念、行业观察、产品思维、认知升级。隐性、思想型。
-- mixed: 既包含具体工具/技术实现，又包含独立认知判断或方法论反思。
+  规则：去掉所有工具/技术细节后，认知观点本身是否仍有独立价值？若无，则不应归为 soft。
+- mixed: 仅当同时满足两个条件：(a) 包含可复制使用的代码/命令/配置（tech≥5），(b) 包含可脱离技术独立成立的深层认知判断（cog≥5）。仅满足一侧不触发 mixed。
 
 评分要求（0-10分）：
-- technical_score: 技术细节的实用度和具体度。
-- cognitive_score: 启发性的问题、观点变化、商业认知张力。
+- technical_score: 技术细节的实用度和具体度。出现可复制使用的命令/代码/配置/操作步骤才能 ≥5。仅提到工具名称不算。
+- cognitive_score: 启发性的问题、观点变化、商业认知张力。出现可脱离工具/技术独立成立的商业判断或方法论反思才能 ≥5。产品体验评价（"好用""丝滑"）不算。
+
+时效性判断（timeliness）：
+- high: 核心方法论、底层思维模型、投资理念、认知框架。十年后仍然成立，不受时间衰减影响。
+- medium: 一般性知识、行业观察、产品分析、工具使用经验。3~5年内有效，随时间逐渐过时。
+- low: 高度时效性内容。某轮融资消息、版本更新日志、热点事件评论。短期内作废。
+判断原则：去掉时间背景后，核心内容是否仍有独立价值？仍然成立 → high；完全无意义 → low；部分保留 → medium。
 
 输出格式：必须且仅能返回一个合法JSON，禁止Markdown标记（如 ```json）。
 {
@@ -178,7 +217,8 @@ SYSTEM_PROMPT = """你是知识碎片分类引擎。评估用户输入的笔记�
   "summary": "一句话核心摘要",
   "refined_content": "结构化提纯后的Markdown（见下方规范）",
   "tech_split": "非必填",
-  "insight_split": "非必填"
+  "insight_split": "非必填",
+  "timeliness": "high | medium | low"
 }
 
 === 背景知识库唤醒（务必执行）===
@@ -193,6 +233,24 @@ SYSTEM_PROMPT = """你是知识碎片分类引擎。评估用户输入的笔记�
 - tech_split: 纯技术实现、代码、命令、排错步骤。提取自原文的技术维度。
 - insight_split: 纯商业判断、行业思考、方法论反思。提取自原文的认知维度。
 两者内容不得重复，各自独立完整。若认知分不足5或非mixed类别，这两个字段留空字符串。
+
+=== [[wikilinks]] 交叉引用规则（根据 knowledge_type 选择策略）===
+
+当 knowledge_type = hard 时：
+- 识别正文中出现的工具名、API 名、命令名、技术名词
+- 在 refined_content 中对该名词使用 [[名词]] 包裹
+- 仅对已在【背景知识库】中出现过的工具/技术做链接
+
+当 knowledge_type = soft 时：
+- 基于【背景知识库】中的摘要，判断新内容与哪些已有笔记存在【递进】【反驳】【互补】关系
+- 在 refined_content 相关段落中插入 [[已有笔记标题]]（不含 _refined.md 后缀）
+- 链接位置要紧贴相关论述，不要堆在文末
+
+当 knowledge_type = mixed 时：
+- tech_split 走 hard 策略，insight_split 走 soft 策略
+- wikilinks 格式：[[文件名（不含后缀）]]，如 [[财商的修炼]]
+- 禁止链接到自身
+- 即使未在背景知识库中出现，如果正文讨论的实体已有明确的对应笔记，也应建立链接
 
 === refined_content 分支策略（根据 knowledge_type 选择模板）===
 
@@ -215,16 +273,18 @@ SYSTEM_PROMPT = """你是知识碎片分类引擎。评估用户输入的笔记�
 当 knowledge_type = hard 时，使用以下三层技术骨架：
 
 🔧 【用途定位】
-- 解决什么问题？适用什么场景？（2-3句说清即可）
+- 解决什么问题？适用什么场景？包含哪些关键名词（工具名、服务名、网站域名）。
 
 📋 【核心方法】
-- 可直接复制使用的代码、命令、配置、操作步骤。
+- 可直接复制使用的代码、命令、配置、操作步骤、URL 链接。
 - 只保留最精简可实操版本，不用解释原理。
 - 多步骤用有序列表，每个步骤一行。
+- 若原始内容仅为工具/网站引用（仅有名称和URL），至少保留完整的工具名称和访问链接，加上一句用途描述。禁止写"无具体技术细节"。
 
 ⚠️ 【避坑指南】
 - 配置陷阱、边界条件、常见报错。
 - 每个坑一句话，用"- "列表。
+- 若原始内容没有可识别的坑，此项可省略。禁止写"无具体技术细节"或"无"。
 
 ---
 
@@ -284,6 +344,7 @@ def route_file(result, src, filename):
     tech_score = result.get("technical_score", 0)
     cog_score = result.get("cognitive_score", 0)
     refined = result.get("refined_content", "")
+    timeliness = result.get("timeliness", "medium")
 
     targets = []
 
@@ -305,20 +366,27 @@ def route_file(result, src, filename):
     for d in targets:
         shutil.copy2(src, os.path.join(d, filename))
 
+    tech_split = result.get("tech_split", "")
+    insight_split = result.get("insight_split", "")
+
     if refined:
         refined_name = f"{os.path.splitext(filename)[0]}_refined.md"
         for d in targets:
+            if d == MANUAL_TECH and tech_split:
+                content_to_write = tech_split
+            elif d == CORE_INSIGHT and insight_split:
+                content_to_write = insight_split
+            else:
+                content_to_write = refined
             with open(os.path.join(d, refined_name), "w", encoding="utf-8") as f:
-                f.write(refined)
+                f.write(content_to_write + f"\n\n> ⏱️ 时效性: {timeliness}\n")
 
-    tech_split = result.get("tech_split", "")
-    insight_split = result.get("insight_split", "")
     if kt == "mixed" and cog_score >= 5 and tech_split and insight_split:
         base = os.path.splitext(filename)[0]
         tech_name = f"tech_{base}.md"
         insight_name = f"insight_{base}.md"
-        tech_content = f"💡 关联底层认知思考：[[{os.path.splitext(insight_name)[0]}]]\n\n{tech_split}"
-        insight_content = f"🛠️ 关联具体技术实现：[[{os.path.splitext(tech_name)[0]}]]\n\n{insight_split}"
+        tech_content = tech_split
+        insight_content = insight_split
         with open(os.path.join(MANUAL_TECH, tech_name), "w", encoding="utf-8") as f:
             f.write(tech_content)
         with open(os.path.join(CORE_INSIGHT, insight_name), "w", encoding="utf-8") as f:
@@ -370,9 +438,12 @@ def main():
         print(json.dumps(result, ensure_ascii=False))
         return result
 
+    log(f"[进度] 发现 {processed} 个文件待处理")
+
     # ---- Step 2 & 3: Process + Commit ----
     retry_state = load_retry_state()
     dead_count = 0
+    seq = 0
 
     for entry in sorted(os.listdir(PROCESSING)):
         filepath = os.path.join(PROCESSING, entry)
@@ -392,6 +463,10 @@ def main():
             })
             continue
 
+        seq += 1
+        log(f"[进度] {seq}/{processed} 处理中: {entry}")
+        start_time = time.time()
+
         try:
             with open(filepath, "r", encoding="utf-8", errors="replace") as f:
                 content = f.read()
@@ -403,25 +478,35 @@ def main():
 
             urls = _extract_urls(content)
             fetched_parts = []
-            for url in urls:
-                log(f"URL_DETECTED {entry}: {url}")
-                article = _fetch_article_content(url)
-                if article:
-                    fetched_parts.append(article)
-                    log(f"URL_FETCHED {entry}: {len(article)} chars from {url[:80]}")
-                    url_hash = hashlib.md5(url.encode()).hexdigest()[:8]
-                    base = os.path.splitext(entry)[0]
-                    raw_source_name = f"{base}_source_{url_hash}.md"
-                    raw_source_path = os.path.join(RAW, raw_source_name)
-                    with open(raw_source_path, "w", encoding="utf-8") as f:
-                        f.write(article)
-                    log(f"COLD_BACKUP {entry}: {len(article)} chars -> raw/{raw_source_name}")
+            if urls:
+                def _fetch_single(url):
+                    log(f"URL_DETECTED {entry}: {url}")
+                    article = _fetch_article_content(url)
+                    if article:
+                        log(f"URL_FETCHED {entry}: {len(article)} chars from {url[:80]}")
+                        url_hash = hashlib.md5(url.encode()).hexdigest()[:8]
+                        base = os.path.splitext(entry)[0]
+                        raw_source_name = f"{base}_source_{url_hash}.md"
+                        raw_source_path = os.path.join(RAW, raw_source_name)
+                        with open(raw_source_path, "w", encoding="utf-8") as f:
+                            f.write(article)
+                        log(f"COLD_BACKUP {entry}: {len(article)} chars -> raw/{raw_source_name}")
+                        return article
+                    log(f"URL_FETCH_FAIL {entry}: {url[:80]}")
+                    return None
+
+                with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+                    futures = [executor.submit(_fetch_single, url) for url in urls]
+                    for future in concurrent.futures.as_completed(futures):
+                        result = future.result()
+                        if result:
+                            fetched_parts.append(result)
             if fetched_parts:
                 ai_input = "\n\n---\n\n".join(fetched_parts) + "\n\n---\n\n[原文]\n" + content
             else:
                 ai_input = content
 
-            background_context = collect_background_context()
+            background_context = collect_background_context(content)
             if background_context:
                 ai_input = f"【背景知识库（请在新内容与它们关联时使用 [相关：标题](标题.md) 插入链接）】\n{background_context}\n\n【待处理内容】\n{ai_input}"
                 log(f"CONTEXT_INJECT {entry}: {len(background_context)} chars background")
@@ -447,6 +532,7 @@ def main():
                 "technical_score": result.get("technical_score", 0),
                 "cognitive_score": result.get("cognitive_score", 0),
             })
+            log(f"[进度] {seq}/{processed} 完成: {entry} ({time.time() - start_time:.1f}s)")
 
         except Exception as e:
             retry_state[entry] = retries + 1
@@ -457,6 +543,7 @@ def main():
                 "status": "failed",
                 "error": str(e)[:120],
             })
+            log(f"[进度] {seq}/{processed} 完成: {entry} ({time.time() - start_time:.1f}s)")
 
     save_retry_state(retry_state)
 
@@ -468,6 +555,7 @@ def main():
         "details": details,
     }
 
+    log(f"[进度] 全部完成，成功 {success} / 失败 {failed} / 总计 {processed}")
     log(f"ENGINE_DONE: processed={processed} success={success} failed={failed} dead={dead_count}")
     print(json.dumps(result, ensure_ascii=False))
     return result

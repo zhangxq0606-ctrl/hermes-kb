@@ -16,30 +16,37 @@ CATEGORIES = {
 
 STYLE_CSS = """\
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f5f5f5; color: #222; line-height: 1.6; }
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #fafbfc; color: #374151; line-height: 1.6; }
 .container { max-width: 640px; margin: 0 auto; padding: 20px 16px; }
-a { color: #4a90d9; text-decoration: none; }
+a { color: #2563eb; text-decoration: none; }
 a:hover { text-decoration: underline; }
 
 header { text-align: center; padding: 32px 0 24px; }
-header h1 { font-size: 24px; font-weight: 700; color: #1a1a1a; }
-header p { font-size: 14px; color: #888; margin-top: 4px; }
+header h1 { font-size: 28px; font-weight: 700; color: #1a1a2e; }
+header p { font-size: 14px; color: #9ca3af; margin-top: 6px; }
 nav { padding: 8px 0 16px; }
 nav a { font-size: 14px; }
 
 .index-hero { text-align: center; padding: 40px 0; }
-.index-hero h2 { font-size: 20px; font-weight: 700; color: #1a1a1a; }
-.index-hero .subtitle { font-size: 14px; color: #888; margin-top: 8px; }
+.index-hero h2 { font-size: 20px; font-weight: 700; color: #1a1a2e; }
+.index-hero .subtitle { font-size: 14px; color: #9ca3af; margin-top: 8px; }
 
 .categories { display: flex; flex-direction: column; gap: 12px; margin-bottom: 32px; }
-.cat-card { display: block; background: #fff; border-radius: 10px; padding: 20px 18px; box-shadow: 0 1px 3px rgba(0,0,0,.06); transition: box-shadow .15s; text-decoration: none; color: #222; }
-.cat-card:hover { box-shadow: 0 2px 8px rgba(0,0,0,.1); text-decoration: none; }
-.cat-card .cat-icon { font-size: 24px; margin-bottom: 8px; }
-.cat-card .cat-name { font-size: 17px; font-weight: 600; }
-.cat-card .cat-count { font-size: 13px; color: #888; margin-top: 4px; }
+.cat-card { display: flex; align-items: center; gap: 12px; background: #fff; border-radius: 12px; padding: 18px 20px; box-shadow: 0 1px 3px rgba(0,0,0,.05); transition: background .15s, box-shadow .15s; text-decoration: none; color: #374151; border-left: 4px solid; }
+.cat-card:hover { box-shadow: 0 2px 6px rgba(0,0,0,.08); text-decoration: none; }
+.cat-card--insight { border-left-color: #d97706; }
+.cat-card--insight:hover { background: #fffbf0; }
+.cat-card--technical { border-left-color: #2563eb; }
+.cat-card--technical:hover { background: #f0f4ff; }
+.cat-card--question { border-left-color: #7c3aed; }
+.cat-card--question:hover { background: #f8f4ff; }
+.cat-card .cat-icon { font-size: 22px; flex-shrink: 0; }
+.cat-card .cat-name { font-size: 16px; font-weight: 600; color: #1a1a2e; }
+.cat-card .cat-desc { margin-left: auto; font-size: 12px; color: #9ca3af; }
+.cat-card .cat-count { font-size: 13px; color: #9ca3af; }
 
-.stats { text-align: center; padding: 16px 0; border-top: 1px solid #eee; }
-.stats span { font-size: 13px; color: #888; }
+.stats { text-align: center; padding: 16px 0; border-top: 1px solid #f3f4f6; }
+.stats span { font-size: 13px; color: #9ca3af; }
 .stats span + span { margin-left: 16px; }
 
 .browse-header a { font-size: 14px; }
@@ -49,28 +56,30 @@ nav a { font-size: 14px; }
 #search { margin-bottom: 20px; }
 
 .doc-list { display: flex; flex-direction: column; gap: 10px; }
-.doc-card { display: block; background: #fff; border-radius: 8px; padding: 16px 18px; box-shadow: 0 1px 3px rgba(0,0,0,.04); text-decoration: none; color: #222; transition: box-shadow .12s; border-left: 3px solid #4a90d9; }
+.doc-card { display: block; background: #fff; border-radius: 8px; padding: 16px 18px; box-shadow: 0 1px 3px rgba(0,0,0,.04); text-decoration: none; color: #374151; transition: box-shadow .12s; border-left: 3px solid #2563eb; }
 .doc-card:hover { box-shadow: 0 2px 6px rgba(0,0,0,.08); text-decoration: none; }
 .doc-card .doc-title { font-size: 15px; font-weight: 600; margin-bottom: 4px; }
-.doc-card .doc-preview { font-size: 13px; color: #999; line-height: 1.5; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-.doc-card .doc-info { font-size: 11px; color: #bbb; margin-top: 8px; display: flex; gap: 12px; align-items: center; }
+.doc-card .doc-preview { font-size: 13px; color: #9ca3af; line-height: 1.5; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.doc-card .doc-info { font-size: 11px; color: #d1d5db; margin-top: 8px; display: flex; gap: 12px; align-items: center; }
 
-.empty-state { text-align: center; padding: 40px 0; color: #bbb; font-size: 14px; }
+.empty-state { text-align: center; padding: 40px 0; color: #d1d5db; font-size: 14px; }
 
-.content { background: #fff; border-radius: 8px; padding: 24px 20px; box-shadow: 0 1px 3px rgba(0,0,0,.08); line-height: 1.8; }
+.content { background: #fff; border-radius: 12px; padding: 24px 20px; box-shadow: 0 1px 3px rgba(0,0,0,.05); line-height: 1.8; }
 .content h1 { font-size: 20px; margin-bottom: 16px; }
 .content h2 { font-size: 17px; margin: 20px 0 10px; }
 .content h3 { font-size: 15px; margin: 16px 0 8px; }
 .content p { margin: 8px 0; }
 .content ul, .content ol { margin: 8px 0; padding-left: 24px; }
 .content li { margin: 4px 0; }
-.content blockquote { border-left: 3px solid #4a90d9; padding: 4px 12px; margin: 12px 0; color: #555; background: #f8f9fa; }
-.content code { background: #f0f0f0; padding: 1px 4px; border-radius: 3px; font-size: 90%; }
-.content pre { background: #2d2d2d; color: #d4d4d4; padding: 14px 16px; border-radius: 8px; overflow-x: auto; font-size: 88%; margin: 10px 0; line-height: 1.5; }
+.content blockquote { border-left: 3px solid #7c3aed; padding: 4px 12px; margin: 12px 0; color: #6b7280; background: #faf5ff; border-radius: 0 6px 6px 0; }
+.content code { background: #f1f5f9; color: #334155; padding: 1px 4px; border-radius: 3px; font-size: 90%; }
+.content pre { background: #1e293b; color: #e2e8f0; padding: 14px 16px; border-radius: 8px; overflow-x: auto; font-size: 88%; margin: 10px 0; line-height: 1.5; }
 .content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
 
-footer { text-align: center; padding: 32px 0; font-size: 12px; color: #bbb; }
-footer a { color: #bbb; }
+.wikilink { color: #7c3aed; border-bottom: 1px dashed #c4b5fd; text-decoration: none; } .wikilink:hover { color: #6d28d9; border-bottom-style: solid; }
+
+footer { text-align: center; padding: 32px 0; font-size: 12px; color: #d1d5db; }
+footer a { color: #d1d5db; }
 
 @media (max-width: 640px) {
   .container { padding: 16px 12px; }
@@ -84,7 +93,7 @@ def html_escape(s):
     return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
 
 
-def render_markdown(text):
+def render_markdown(text, slug_map=None):
     lines = text.split("\n")
     out = []
     in_list = False
@@ -187,6 +196,15 @@ def render_markdown(text):
 
     rendered = "\n".join(out)
     rendered = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", r'<a href="\2">\1</a>', rendered)
+    if slug_map:
+        def _replace_wikilink(m):
+            name = m.group(1)
+            if name in slug_map:
+                return '<a href="%s" class="wikilink">%s</a>' % (slug_map[name], name)
+            return '<a href="/browse/insight.html?q=%s" class="wikilink">%s</a>' % (name, name)
+        rendered = re.sub(r"\[\[([^\]]+)\]\]", _replace_wikilink, rendered)
+    else:
+        rendered = re.sub(r"\[\[([^\]]+)\]\]", r'<a href="/browse/insight.html?q=\1" class="wikilink">\1</a>', rendered)
     rendered = re.sub(r"`([^`]+)`", r"<code>\1</code>", rendered)
     rendered = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", rendered)
     rendered = re.sub(r"\*(.+?)\*", r"<em>\1</em>", rendered)
@@ -267,7 +285,7 @@ def make_head(title, back_url=None):
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{html_escape(title)} - Hermes</title>
+<title>{html_escape(title)} - Xq.KB</title>
 <link rel="stylesheet" href="/assets/style.css">
 <script src="/pagefind/pagefind-ui.js"></script>
 </head>
@@ -278,7 +296,7 @@ def make_head(title, back_url=None):
 
 
 def make_foot():
-    return """<footer>Hermes KB · <a href="/">首页</a></footer>
+    return """<footer>Xq.KB · <a href="/">首页</a></footer>
 </div>
 </body>
 </html>"""
@@ -293,15 +311,16 @@ def generate_index(docs):
     for key, cfg in CATEGORIES.items():
         count = len(docs.get(key, []))
         icons = {"insight": "💡", "technical": "⚙️", "question": "❓"}
-        cats_html += f"""<a class="cat-card" href="/browse/{key}.html">
-  <div class="cat-icon">{icons.get(key, "")}</div>
-  <div class="cat-name">{cfg["label"]}</div>
-  <div class="cat-count">{count} 篇文档</div>
+        descs = {"insight": "洞察 · 认知 · 思维框架", "technical": "工具 · 命令 · 实操方法", "question": "反思 · 追问 · 深度思考"}
+        cats_html += f"""<a class="cat-card cat-card--{key}" href="/browse/{key}.html">
+  <span class="cat-icon">{icons.get(key, "")}</span>
+  <span class="cat-name">{cfg["label"]}</span>
+  <span class="cat-desc">{descs.get(key, "")}</span>
 </a>"""
 
-    html = make_head("Hermes 知识库") + f"""
+    html = make_head("首页") + f"""
 <header>
-  <h1>Hermes 知识库</h1>
+  <h1>Xq.KB</h1>
   <p>静态文档浏览 · 全文检索</p>
 </header>
 <div id="search"></div>
@@ -312,7 +331,7 @@ def generate_index(docs):
 </div>
 <div class="stats">
   <span>{total} 篇文档</span>
-  <span>3 个分类</span>
+  <span>{len(CATEGORIES)} 个分类</span>
 </div>
 """ + make_foot()
 
@@ -360,6 +379,12 @@ def generate_browse(docs):
 
 
 def generate_detail(docs):
+    # 构建 slug → rel_url 映射表，用于 wikilinks 编译期查表替换
+    slug_to_url = {}
+    for key, items in docs.items():
+        for d in items:
+            slug_to_url[d['slug']] = d['rel_url']
+
     for key, items in docs.items():
         for d in items:
             path = os.path.join(PUBLIC_DIR, "detail", key, f"{d['slug']}.html")
@@ -371,10 +396,10 @@ def generate_detail(docs):
             except Exception:
                 raw = "（无法读取文件）"
 
-            content = _render_detail_markdown(raw)
+            content = _render_detail_markdown(raw, slug_map=slug_to_url)
 
             cat_label = CATEGORIES[key]["label"]
-            html = make_head(d["title"] + " - Hermes", f"/browse/{key}.html") + f"""
+            html = make_head(d["title"] + " - Xq.KB", f"/browse/{key}.html") + f"""
 <header class="browse-header">
   <h1>{html_escape(d['title'])}</h1>
   <p>{cat_label} · {_time_str(d['mtime'])}</p>
@@ -389,8 +414,8 @@ def generate_detail(docs):
             print(f"  {path}")
 
 
-def _render_detail_markdown(text):
-    rendered = render_markdown(text)
+def _render_detail_markdown(text, slug_map=None):
+    rendered = render_markdown(text, slug_map=slug_map)
     rendered = rendered.replace(
         '<a href="',
         '<a target="_blank" rel="noopener" href="'

@@ -97,11 +97,21 @@ def _iter_refined_files():
     return refined_files
 
 
-def _load_cache():
+_memory_cache = None
+_memory_cache_time = 0
+
+
+def _load_cache(force_reload=False):
+    global _memory_cache, _memory_cache_time
+    if _memory_cache is not None and not force_reload:
+        return _memory_cache
     if os.path.exists(CACHE_PATH):
         with open(CACHE_PATH, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return {"files": {}}
+            _memory_cache = json.load(f)
+    else:
+        _memory_cache = {"files": {}}
+    _memory_cache_time = time.time()
+    return _memory_cache
 
 
 def _save_cache(cache):
@@ -143,11 +153,12 @@ def build_index():
     cache["files"] = files_result
     cache["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     _save_cache(cache)
+    _load_cache(force_reload=True)
 
     return {"updated": updated, "skipped": skipped, "total": len(refined_files)}
 
 
-def search(query, top_k=5):
+def search(query, top_k=5, min_score=0.3):
     cache = _load_cache()
     files = cache.get("files", {})
     if not files:
@@ -164,7 +175,20 @@ def search(query, top_k=5):
         scored.append((path, sim))
 
     scored.sort(key=lambda x: x[1], reverse=True)
-    return scored[:top_k]
+
+    filtered = [(p, s) for p, s in scored if s >= min_score]
+    filtered = filtered[:top_k]
+
+    result = []
+    for rel_path, score in filtered:
+        full_path = os.path.join(BASE_DIR, rel_path)
+        try:
+            mtime = os.path.getmtime(full_path)
+        except OSError:
+            mtime = 0
+        result.append((rel_path, score, mtime))
+
+    return result
 
 
 if __name__ == "__main__":

@@ -4,10 +4,11 @@ import threading
 import time
 import hashlib
 import json
+import random
 import subprocess
 from datetime import datetime
 
-from flask import Flask, request, jsonify, Response, stream_with_context
+from flask import Flask, request, jsonify, Response, stream_with_context, redirect
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import qa_engine
@@ -23,12 +24,20 @@ BROWSE_ROOTS = [
     ("manual/technical", os.path.join(BASE_DIR, "manual", "technical")),
 ]
 
+CARD_COLORS = [
+    "#2563eb", "#d97706", "#7c3aed", "#059669", "#dc2626",
+    "#0891b2", "#c026d3", "#65a30d", "#e11d48", "#4f46e5",
+]
+
 _reindex_lock = threading.Lock()
 _reindex_interval = 300
 _reindex_hash_file = os.path.join(semantic_index.CACHE_PATH + ".state")
 
 _pipeline_state = {"running": False, "last_run": None, "last_result": None}
 _pipeline_lock = threading.Lock()
+
+_file_index_cache = {"data": None, "timestamp": 0}
+_FILE_INDEX_CACHE_TTL = 300
 
 
 def _watchdog_pipeline():
@@ -74,7 +83,7 @@ def _run_pipeline():
     finally:
         with _pipeline_lock:
             _pipeline_state["running"] = False
-            _pipeline_state["last_run"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+            _pipeline_state["last_run"] = time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime())
             _pipeline_state["last_result"] = result
 
     return result
@@ -106,53 +115,72 @@ INDEX_HTML = """<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Hermes 知识库</title>
+<title>Xq.KB</title>
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f5f5f5; color: #222; line-height: 1.6; }
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #fafbfc; color: #374151; line-height: 1.6; }
 .container { max-width: 640px; margin: 0 auto; padding: 20px 16px; }
-header { text-align: center; padding: 32px 0 24px; }
-header h1 { font-size: 24px; font-weight: 700; color: #1a1a1a; }
-header p { font-size: 14px; color: #888; margin-top: 4px; }
+header { text-align: center; padding: 40px 0 28px; }
+header h1 { font-size: 28px; font-weight: 700; color: #1a1a2e; }
+header p { font-size: 14px; color: #9ca3af; margin-top: 6px; }
+
+.browse-entry { margin-bottom: 24px; }
+.browse-entry a { display: flex; align-items: center; gap: 12px; background: #fff; border-radius: 12px; padding: 16px 20px; box-shadow: 0 1px 3px rgba(0,0,0,.05); text-decoration: none; color: #374151; transition: background .15s, box-shadow .15s; border-left: 4px solid #2563eb; }
+.browse-entry a:hover { box-shadow: 0 2px 6px rgba(0,0,0,.08); background: #f0f4ff; text-decoration: none; }
+.browse-entry .be-icon { font-size: 22px; flex-shrink: 0; }
+.browse-entry .be-label { font-size: 16px; font-weight: 600; color: #1a1a2e; flex: 1; }
+.browse-entry .be-arrow { font-size: 18px; color: #2563eb; }
+
 .search-box { display: flex; gap: 8px; margin-bottom: 16px; }
-.search-box input { flex: 1; padding: 12px 16px; border: 1px solid #ddd; border-radius: 8px; font-size: 16px; outline: none; transition: border-color .2s; }
-.search-box input:focus { border-color: #4a90d9; }
-.search-box button { padding: 12px 20px; background: #4a90d9; color: #fff; border: none; border-radius: 8px; font-size: 16px; cursor: pointer; transition: background .2s; }
-.search-box button:hover { background: #3a7bc8; }
-.search-box button:disabled { background: #aaa; cursor: not-allowed; }
-.index-bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; font-size: 13px; color: #888; }
-.index-bar button { background: none; border: 1px solid #ddd; padding: 4px 10px; border-radius: 4px; color: #888; cursor: pointer; font-size: 12px; }
-.index-bar button:hover { border-color: #4a90d9; color: #4a90d9; }
+.search-box input { flex: 1; padding: 12px 16px; border: 1px solid #e5e7eb; border-radius: 8px; font-size: 16px; outline: none; transition: border-color .2s; background: #fff; }
+.search-box input:focus { border-color: #2563eb; }
+.search-box button { padding: 12px 20px; background: #2563eb; color: #fff; border: none; border-radius: 8px; font-size: 16px; cursor: pointer; transition: background .2s; }
+.search-box button:hover { background: #1d4ed8; }
+.search-box button:disabled { background: #94a3b8; cursor: not-allowed; }
+.index-bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; font-size: 13px; color: #9ca3af; }
+.index-bar button { background: none; border: 1px solid #e5e7eb; padding: 4px 10px; border-radius: 6px; color: #6b7280; cursor: pointer; font-size: 12px; }
+.index-bar button:hover { border-color: #2563eb; color: #2563eb; }
 .index-bar button:disabled { opacity: .5; cursor: not-allowed; }
-.answer-area { display: none; background: #fff; border-radius: 8px; padding: 20px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+.answer-area { display: none; background: #fff; border-radius: 12px; padding: 20px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,.05); }
 .answer-area.show { display: block; }
 .answer-area .answer-text { font-size: 15px; word-break: break-word; line-height: 1.7; }
 .answer-area .answer-text p { margin: 0 0 8px 0; }
 .answer-area .answer-text p:last-child { margin-bottom: 0; }
-.answer-area .sources { margin-top: 16px; padding-top: 12px; border-top: 1px solid #eee; }
-.answer-area .sources h3 { font-size: 13px; color: #888; margin-bottom: 6px; }
-.answer-area .sources a { display: block; font-size: 14px; color: #4a90d9; text-decoration: none; padding: 3px 0; }
+.answer-area .sources { margin-top: 16px; padding-top: 12px; border-top: 1px solid #f3f4f6; }
+.answer-area .sources h3 { font-size: 13px; color: #9ca3af; margin-bottom: 6px; }
+.answer-area .sources a { display: block; font-size: 14px; color: #2563eb; text-decoration: none; padding: 3px 0; }
 .answer-area .sources a:hover { text-decoration: underline; }
-.loading { display: none; text-align: center; padding: 40px 0; color: #888; }
+.loading { display: none; text-align: center; padding: 40px 0; color: #9ca3af; }
 .loading.show { display: block; }
-.footer { text-align: center; padding: 24px 0; }
-.footer a { color: #4a90d9; text-decoration: none; font-size: 14px; }
-.footer a:hover { text-decoration: underline; }
 </style>
 </head>
 <body>
 <div class="container">
 <header>
-  <h1>Hermes 知识库</h1>
-  <p>基于语义搜索的智能问答</p>
+  <h1>Xq.KB</h1>
+  <p>知识捕获 &middot; AI 提纯 &middot; 语义搜索</p>
 </header>
+<div class="browse-entry">
+  <a href="/browse">
+    <span class="be-icon">&#128218;</span>
+    <span class="be-label">浏览知识库</span>
+    <span class="be-arrow">&rarr;</span>
+  </a>
+</div>
+<div class="browse-entry">
+  <a href="/chat">
+    <span class="be-icon">&#128172;</span>
+    <span class="be-label">对话</span>
+    <span class="be-arrow">&rarr;</span>
+  </a>
+</div>
 <div class="search-box">
   <input id="question" type="text" placeholder="输入你的问题..." autofocus>
   <button id="ask-btn">提问</button>
 </div>
 <div class="index-bar">
   <div>
-      <div id="pipeline-status" style="font-size:12px;color:#aaa;">管道: --</div>
+      <div id="pipeline-status" style="font-size:12px;color:#9ca3af;">管道: --</div>
     </div>
   <div>
     <button id="pipeline-btn">处理收件箱</button>
@@ -164,9 +192,7 @@ header p { font-size: 14px; color: #888; margin-top: 4px; }
   <div class="answer-text" id="answer-text"></div>
   <div class="sources" id="sources"></div>
 </div>
-<div class="footer">
-  <a href="/browse">浏览知识库</a>
-</div>
+
 </div>
 <script>
 document.addEventListener('DOMContentLoaded', function() {
@@ -271,7 +297,8 @@ function doAsk() {
     if (d.sources && d.sources.length > 0) {
       var html = '<h3>引用来源</h3>';
       d.sources.forEach(function(s) {
-        html += '<a href="/view/' + encodeURIComponent(s) + '">' + s + '</a>';
+        html += '<a href="/view/' + encodeURIComponent(s.path) + '">' + s.title + '</a>';
+        html += ' <span style="font-size:11px;color:#9ca3af">[' + s.section + ']</span>';
       });
       sources.innerHTML = html;
     }
@@ -288,60 +315,219 @@ function doAsk() {
 </body>
 </html>"""
 
+CHAT_HTML = """<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>对话 - Xq.KB</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #fafbfc; color: #374151; line-height: 1.6; }
+.container { max-width: 640px; margin: 0 auto; padding: 0 16px; }
+.top-bar { display: flex; justify-content: space-between; align-items: center; padding: 16px 0; border-bottom: 1px solid #e5e7eb; }
+.top-bar h1 { font-size: 18px; font-weight: 700; color: #1a1a2e; }
+.top-bar button { background: none; border: 1px solid #e5e7eb; padding: 5px 14px; border-radius: 6px; font-size: 13px; color: #6b7280; cursor: pointer; }
+.top-bar button:hover { border-color: #2563eb; color: #2563eb; }
+
+#chat-messages { padding: 16px 0; }
+.msg { display: flex; margin-bottom: 16px; }
+.msg.user { justify-content: flex-end; }
+.msg.bot { justify-content: flex-start; }
+.msg .bubble { max-width: 85%; padding: 10px 14px; border-radius: 10px; font-size: 14px; line-height: 1.65; word-break: break-word; }
+.msg.user .bubble { background: #2563eb; color: #fff; border-bottom-right-radius: 4px; }
+.msg.bot .bubble { background: #fff; color: #374151; box-shadow: 0 1px 3px rgba(0,0,0,.08); border-bottom-left-radius: 4px; }
+.msg.bot .bubble p { margin: 0 0 6px 0; }
+.msg.bot .bubble p:last-child { margin-bottom: 0; }
+.msg.bot .bubble strong { color: #1a1a2e; }
+
+.msg-sources { margin-top: 8px; padding-top: 8px; border-top: 1px solid #f3f4f6; }
+.msg-sources .src-label { font-size: 11px; color: #9ca3af; margin-bottom: 4px; }
+.msg-sources a { display: block; font-size: 13px; color: #2563eb; text-decoration: none; padding: 2px 0; }
+.msg-sources a:hover { text-decoration: underline; }
+.msg-sources .src-tag { font-size: 10px; color: #9ca3af; }
+
+.msg .thinking { color: #9ca3af; font-size: 14px; padding: 10px 14px; }
+
+.input-bar { display: flex; gap: 8px; padding: 12px 0; border-bottom: 1px solid #e5e7eb; margin-bottom: 16px; }
+.input-bar textarea { flex: 1; padding: 10px 12px; border: 1px solid #e5e7eb; border-radius: 8px; font-size: 14px; outline: none; resize: none; font-family: inherit; line-height: 1.5; }
+.input-bar textarea:focus { border-color: #2563eb; }
+.input-bar button { padding: 10px 18px; background: #2563eb; color: #fff; border: none; border-radius: 8px; font-size: 14px; cursor: pointer; white-space: nowrap; align-self: flex-end; }
+.input-bar button:hover { background: #1d4ed8; }
+.input-bar button:disabled { background: #94a3b8; cursor: not-allowed; }
+
+.back-link { text-align: center; padding: 0 0 12px; flex-shrink: 0; }
+.back-link a { font-size: 13px; color: #9ca3af; text-decoration: none; }
+.back-link a:hover { color: #2563eb; }
+</style>
+</head>
+<body>
+<div class="container">
+<div class="top-bar">
+  <h1>Xq.KB 对话</h1>
+  <button id="new-chat-btn">新对话</button>
+</div>
+<div class="input-bar">
+  <textarea id="chat-input" placeholder="输入你的问题..." rows="2"></textarea>
+  <button id="send-btn">发送</button>
+</div>
+<div id="chat-messages"></div>
+<div class="back-link"><a href="/">← 返回首页</a></div>
+</div>
+<script>
+var sessionId = null;
+var messagesEl = document.getElementById('chat-messages');
+var inputEl = document.getElementById('chat-input');
+var sendBtn = document.getElementById('send-btn');
+var newChatBtn = document.getElementById('new-chat-btn');
+
+function escapeHtml(s) {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function addUserBubble(text) {
+  var div = document.createElement('div');
+  div.className = 'msg user';
+  div.innerHTML = '<div class="bubble">' + escapeHtml(text) + '</div>';
+  messagesEl.appendChild(div);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+}
+
+function addThinkingBubble() {
+  var div = document.createElement('div');
+  div.className = 'msg bot';
+  div.innerHTML = '<div class="thinking">正在思考...</div>';
+  messagesEl.appendChild(div);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+  return div;
+}
+
+function addBotBubble(answer, sources) {
+  var html = escapeHtml(answer)
+    .replace(/\\*\\*(.+?)\\*\\*/g, '<strong>$1</strong>')
+    .replace(/\\n\\n/g, '</p><p>')
+    .replace(/\\n/g, '<br>');
+  var body = '<p>' + html + '</p>';
+
+  if (sources && sources.length > 0) {
+    body += '<div class="msg-sources"><div class="src-label">引用来源</div>';
+    sources.forEach(function(s) {
+      body += '<a href="/view/' + encodeURIComponent(s.path) + '">' + escapeHtml(s.title) + '</a>';
+      body += ' <span class="src-tag">[' + escapeHtml(s.section) + ']</span>';
+    });
+    body += '</div>';
+  }
+
+  var div = document.createElement('div');
+  div.className = 'msg bot';
+  div.innerHTML = '<div class="bubble">' + body + '</div>';
+  messagesEl.appendChild(div);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+}
+
+function doSend() {
+  var q = inputEl.value.trim();
+  if (!q) return;
+  inputEl.value = '';
+  sendBtn.disabled = true;
+
+  addUserBubble(q);
+  var thinkEl = addThinkingBubble();
+
+  fetch('/chat', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({question: q, session_id: sessionId})
+  }).then(function(r) { return r.json(); })
+  .then(function(d) {
+    thinkEl.remove();
+    sessionId = d.session_id;
+    addBotBubble(d.answer, d.sources);
+    sendBtn.disabled = false;
+  }).catch(function(err) {
+    thinkEl.remove();
+    addBotBubble('请求失败：' + err.message, []);
+    sendBtn.disabled = false;
+  });
+}
+
+sendBtn.addEventListener('click', doSend);
+inputEl.addEventListener('keydown', function(e) {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    doSend();
+  }
+});
+
+newChatBtn.addEventListener('click', function() {
+  if (!sessionId) { messagesEl.innerHTML = ''; return; }
+  fetch('/chat/clear', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({session_id: sessionId})
+  }).then(function(r) { return r.json(); })
+  .then(function() {
+    sessionId = null;
+    messagesEl.innerHTML = '';
+  });
+});
+</script>
+</body>
+</html>"""
+
 BROWSE_HTML_HEAD = """<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>浏览知识库 - Hermes</title>
+<title>浏览 - Xq.KB</title>
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f5f5f5; color: #222; line-height: 1.6; }
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #fafbfc; color: #374151; line-height: 1.6; }
 .container { max-width: 640px; margin: 0 auto; padding: 20px 16px; }
 header { text-align: center; padding: 32px 0 24px; }
 header h1 { font-size: 22px; font-weight: 700; }
-header a { font-size: 14px; color: #4a90d9; text-decoration: none; }
+header a { font-size: 14px; color: #2563eb; text-decoration: none; }
 header a:hover { text-decoration: underline; }
 
-.tab-bar { display: flex; gap: 4px; margin-bottom: 16px; border-bottom: 2px solid #eee; }
-.tab { flex: 1; padding: 10px 4px; background: none; border: none; border-bottom: 2px solid transparent; margin-bottom: -2px; font-size: 14px; color: #999; cursor: pointer; transition: color .2s, border-color .2s; }
-.tab:hover { color: #555; }
-.tab.active { color: #4a90d9; border-bottom-color: #4a90d9; font-weight: 600; }
+.tab-bar { display: flex; gap: 4px; margin-bottom: 16px; border-bottom: 2px solid #f3f4f6; }
+.tab { flex: 1; padding: 10px 4px; background: none; border: none; border-bottom: 2px solid transparent; margin-bottom: -2px; font-size: 14px; color: #9ca3af; cursor: pointer; transition: color .2s, border-color .2s; }
+.tab:hover { color: #6b7280; }
+.tab.active { color: #2563eb; border-bottom-color: #2563eb; font-weight: 600; }
+.tab.active[data-tab="硬知识"] { color: #2563eb; border-bottom-color: #2563eb; }
+.tab.active[data-tab="软智慧"] { color: #d97706; border-bottom-color: #d97706; }
+.tab.active[data-tab="问题拷问"] { color: #7c3aed; border-bottom-color: #7c3aed; }
 
 .tab-area {}
 
-.filter-row { display: flex; gap: 8px; margin-bottom: 14px; }
-.filter { padding: 4px 12px; background: #f0f0f0; border: none; border-radius: 12px; color: #888; cursor: pointer; font-size: 13px; transition: background .2s, color .2s; }
-.filter:hover { background: #e0e0e0; }
-.filter.active { background: #4a90d9; color: #fff; }
-
 .section { margin-bottom: 24px; }
-.section h2 { font-size: 13px; font-weight: 600; color: #999; padding: 8px 0; margin-bottom: 10px; border-bottom: 1px solid #eee; display: flex; align-items: center; gap: 8px; text-transform: uppercase; letter-spacing: .5px; }
-.section h2 .count { font-size: 11px; font-weight: 400; color: #aaa; background: #f0f0f0; padding: 2px 8px; border-radius: 10px; }
-.section .empty { color: #bbb; font-size: 14px; padding: 16px 0; text-align: center; }
+.section h2 { font-size: 13px; font-weight: 600; color: #9ca3af; padding: 8px 0; margin-bottom: 10px; border-bottom: 1px solid #f3f4f6; display: flex; align-items: center; gap: 8px; text-transform: uppercase; letter-spacing: .5px; }
+.section h2 .count { font-size: 11px; font-weight: 400; color: #9ca3af; background: #f3f4f6; padding: 2px 8px; border-radius: 10px; }
+.section .empty { color: #d1d5db; font-size: 14px; padding: 16px 0; text-align: center; }
 
 .card-group { margin-bottom: 10px; border-radius: 10px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,.06); background: #fff; }
-.card { display: block; padding: 14px 16px; text-decoration: none; color: #222; transition: background .12s; }
-.card:hover { background: #fafbff; }
-.card:not(:last-child) { border-bottom: 1px solid #f2f2f2; }
+.card { display: block; padding: 14px 16px; text-decoration: none; color: #374151; transition: background .12s; }
+.card:hover { background: #f8fafc; }
+.card:not(:last-child) { border-bottom: 1px solid #f3f4f6; }
 
-.card.refined { background: linear-gradient(135deg, #f8faff 0%, #f0f5ff 100%); border-left: 3px solid #4a90d9; padding-left: 13px; }
-.card.refined:hover { background: linear-gradient(135deg, #f0f4ff 0%, #e8efff 100%); }
+.card.refined { background: #fff; border-left: 3px solid; padding-left: 13px; }
+.card.refined:hover { background: #f0f4ff; }
 
-.card.original { background: #fafafa; padding: 7px 13px; border-left: 3px solid #e0e0e0; }
-.card.original:hover { background: #f5f5f5; }
-.card.original .card-title { font-size: 13px; font-weight: 400; color: #888; margin-bottom: 0; }
+.card.original { background: #fafafa; padding: 7px 13px; border-left: 3px solid #e5e7eb; }
+.card.original:hover { background: #f3f4f6; }
+.card.original .card-title { font-size: 13px; font-weight: 400; color: #6b7280; margin-bottom: 0; }
 .card.original .card-preview { display: none; }
-.card.original .card-meta { font-size: 10px; color: #ddd; }
+.card.original .card-meta { font-size: 10px; color: #d1d5db; }
 .card.original .badge { display: none; }
+.card-group .card.original { border-left: none; padding-left: 16px; }
 
-.card-title { font-size: 15px; font-weight: 600; color: #1a1a1a; margin-bottom: 4px; display: flex; align-items: center; gap: 8px; }
+.card-title { font-size: 15px; font-weight: 600; color: #1a1a2e; margin-bottom: 4px; display: flex; align-items: center; gap: 8px; }
 .card-title .badge { display: inline-block; font-size: 10px; font-weight: 600; padding: 1px 7px; border-radius: 8px; white-space: nowrap; flex-shrink: 0; }
-.badge-refined { color: #4a90d9; background: #dce8fc; }
-.badge-original { color: #999; background: #eee; }
+.badge-refined { }
+.badge-original { color: #9ca3af; background: #f3f4f6; }
 
-.card-preview { font-size: 13px; color: #999; line-height: 1.5; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; margin-bottom: 6px; }
-.card-meta { font-size: 12px; color: #ccc; }
+.card-preview { font-size: 13px; color: #9ca3af; line-height: 1.5; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; margin-bottom: 6px; }
+.card-meta { font-size: 12px; color: #d1d5db; }
 
 @media (max-width: 640px) {
   .tab { font-size: 13px; padding: 8px 2px; }
@@ -367,36 +553,38 @@ VIEW_HTML = """<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{{ title }} - Hermes</title>
+<title>{{ title }} - Xq.KB</title>
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f5f5f5; color: #222; line-height: 1.8; }
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #fafbfc; color: #374151; line-height: 1.8; }
 .container { max-width: 640px; margin: 0 auto; padding: 20px 16px; }
 nav { padding: 12px 0 20px; }
-nav a { font-size: 14px; color: #4a90d9; text-decoration: none; }
+nav a { font-size: 14px; color: #2563eb; text-decoration: none; }
 nav a:hover { text-decoration: underline; }
-.content { background: #fff; border-radius: 8px; padding: 24px 20px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+.content { max-width: 680px; background: #fff; border-radius: 12px; padding: 24px 20px; box-shadow: 0 1px 3px rgba(0,0,0,.05); }
 .content h1 { font-size: 20px; margin-bottom: 16px; }
 .content h2 { font-size: 17px; margin: 20px 0 10px; }
 .content h3 { font-size: 15px; margin: 16px 0 8px; }
 .content p { margin: 8px 0; }
 .content ul, .content ol { margin: 8px 0; padding-left: 24px; }
 .content li { margin: 4px 0; }
-.content blockquote { border-left: 3px solid #4a90d9; padding: 4px 12px; margin: 12px 0; color: #555; background: #f8f9fa; }
-.content code { background: #f0f0f0; padding: 1px 4px; border-radius: 3px; font-size: 90%%; }
-.content pre { background: #f0f0f0; padding: 12px; border-radius: 6px; overflow-x: auto; font-size: 90%%; margin: 10px 0; }
-.answer-section { margin-top: 24px; border-top: 2px solid #4a90d9; padding-top: 16px; }
-.answer-section h3 { font-size: 15px; color: #4a90d9; margin-bottom: 10px; }
-.answer-text { background: #f8faff; padding: 14px 16px; border-radius: 8px; font-size: 14px; line-height: 1.6; white-space: pre-wrap; word-break: break-word; margin-bottom: 10px; }
-.answer-btn { padding: 8px 20px; background: #4a90d9; color: #fff; border: none; border-radius: 6px; font-size: 14px; cursor: pointer; }
-.answer-btn:hover { background: #3a7bc8; }
+.content blockquote { border-left: 3px solid #7c3aed; padding: 4px 12px; margin: 12px 0; color: #6b7280; background: #faf5ff; border-radius: 0 6px 6px 0; }
+.content code { background: #f1f5f9; color: #334155; padding: 1px 4px; border-radius: 3px; font-size: 90%%; }
+.content pre { background: #1e293b; color: #e2e8f0; padding: 14px 16px; border-radius: 8px; overflow-x: auto; font-size: 88%%; margin: 10px 0; line-height: 1.5; }
+.content pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+.answer-section { margin-top: 24px; border-top: 2px solid #2563eb; padding-top: 16px; }
+.answer-section h3 { font-size: 15px; color: #2563eb; margin-bottom: 10px; }
+.answer-text { background: #f0f4ff; padding: 14px 16px; border-radius: 8px; font-size: 14px; line-height: 1.6; white-space: pre-wrap; word-break: break-word; margin-bottom: 10px; }
+.answer-btn { padding: 8px 20px; background: #2563eb; color: #fff; border: none; border-radius: 6px; font-size: 14px; cursor: pointer; }
+.answer-btn:hover { background: #1d4ed8; }
 .answer-editor { display: none; margin-top: 10px; }
 .answer-editor.show { display: block; }
-.answer-editor textarea { width: 100%; min-height: 120px; padding: 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px; font-family: inherit; resize: vertical; outline: none; }
-.answer-editor textarea:focus { border-color: #4a90d9; }
+.answer-editor textarea { width: 100%%; min-height: 120px; padding: 12px; border: 1px solid #e5e7eb; border-radius: 6px; font-size: 14px; font-family: inherit; resize: vertical; outline: none; }
+.answer-editor textarea:focus { border-color: #2563eb; }
 .answer-editor .actions { display: flex; gap: 8px; margin-top: 10px; }
-.answer-editor .cancel-btn { padding: 8px 20px; background: #f0f0f0; color: #666; border: none; border-radius: 6px; font-size: 14px; cursor: pointer; }
-.answer-badge { display: inline-block; font-size: 12px; font-weight: 600; color: #22a45a; background: #e6f7ee; padding: 2px 8px; border-radius: 8px; }
+.answer-editor .cancel-btn { padding: 8px 20px; background: #f3f4f6; color: #6b7280; border: none; border-radius: 6px; font-size: 14px; cursor: pointer; }
+.answer-badge { display: inline-block; font-size: 12px; font-weight: 600; color: #16a34a; background: #f0fdf4; padding: 2px 8px; border-radius: 8px; }
+.wikilink { color: #7c3aed; border-bottom: 1px dashed #c4b5fd; text-decoration: none; } .wikilink:hover { color: #6d28d9; border-bottom-style: solid; }
 @media (max-width: 640px) { .answer-editor textarea { min-height: 144px; } }
 </style>
 </head>
@@ -485,6 +673,30 @@ def ask_stream():
     return Response(stream_with_context(generate()), mimetype="text/event-stream")
 
 
+@app.route("/chat", methods=["GET", "POST"])
+def chat():
+    if request.method == "GET":
+        return CHAT_HTML
+    data = request.get_json(silent=True)
+    if not data or "question" not in data:
+        return jsonify({"answer": "请提供问题。", "sources": [], "session_id": None}), 400
+    question = data["question"].strip()
+    if not question:
+        return jsonify({"answer": "问题不能为空。", "sources": [], "session_id": None}), 400
+    session_id = data.get("session_id", None)
+    result = qa_engine.chat(question, session_id)
+    return jsonify(result)
+
+
+@app.route("/chat/clear", methods=["POST"])
+def chat_clear():
+    data = request.get_json(silent=True)
+    if not data or "session_id" not in data:
+        return jsonify({"ok": False, "error": "缺少 session_id"}), 400
+    qa_engine.SessionManager.clear_session(data["session_id"])
+    return jsonify({"ok": True})
+
+
 @app.route("/index/status")
 def index_status():
     cache_path = semantic_index.CACHE_PATH
@@ -547,6 +759,56 @@ def _parse_filename(fn):
     if name.endswith("_refined"):
         return name[:-8], True
     return name, False
+
+
+def _is_derived_file(fn):
+    """系统派生文件（tech_/insight_ 分裂 + _source_ URL冷备），不进入浏览页。"""
+    if not fn.endswith(".md"):
+        return False
+    name = fn[:-3]
+    if name.startswith("tech_") or name.startswith("insight_"):
+        return True
+    if "_source_" in name:
+        return True
+    return False
+
+
+def _canonical_key(fn):
+    """归一化文件名：去掉 _refined、tech_/insight_ 前缀、_source_<hash> 后缀。"""
+    import re
+    name = fn[:-3] if fn.endswith(".md") else fn
+    if name.endswith("_refined"):
+        name = name[:-8]
+    if name.startswith("tech_"):
+        name = name[5:]
+    if name.startswith("insight_"):
+        name = name[8:]
+    name = re.sub(r"_source_[a-f0-9]+$", "", name)
+    return name
+
+
+def _entry_role(fn):
+    """判断文件在 canonical group 中的角色。"""
+    name = fn[:-3] if fn.endswith(".md") else fn
+    if name.endswith("_refined"):
+        return "refined"
+    if name.startswith("tech_"):
+        return "tech_split"
+    if name.startswith("insight_"):
+        return "insight_split"
+    if "_source_" in name:
+        return "source"
+    return "original"
+
+
+ROLE_LABEL = {
+    "refined": "精炼",
+    "original": "原文",
+    "tech_split": "技术拆分",
+    "insight_split": "认知拆分",
+    "source": "冷备",
+}
+ROLE_ORDER = ["refined", "original", "tech_split", "insight_split", "source"]
 
 
 def _extract_meta(fp):
@@ -619,43 +881,6 @@ def _extract_answer(fp):
 
 @app.route("/browse")
 def browse():
-    sections = []
-    for label, dirpath in BROWSE_ROOTS:
-        entries = []
-        if os.path.isdir(dirpath):
-            for fn in os.listdir(dirpath):
-                fp = os.path.join(dirpath, fn)
-                if not os.path.isfile(fp) or not fn.endswith(".md"):
-                    continue
-                base, is_refined = _parse_filename(fn)
-                title, preview = _extract_meta(fp)
-                mtime = os.path.getmtime(fp)
-                entries.append({
-                    "fn": fn,
-                    "base": base,
-                    "is_refined": is_refined,
-                    "title": title or base,
-                    "preview": preview,
-                    "mtime": mtime,
-                    "rel": "%s/%s" % (label, fn)
-                })
-
-        groups = {}
-        for e in entries:
-            key = e["base"]
-            if key not in groups:
-                groups[key] = []
-            groups[key].append(e)
-
-        ordered_groups = []
-        for base, items in groups.items():
-            refined = [e for e in items if e["is_refined"]]
-            originals = [e for e in items if not e["is_refined"]]
-            ordered_groups.append(refined + originals)
-
-        ordered_groups.sort(key=lambda g: max(e["mtime"] for e in g), reverse=True)
-        sections.append((label, ordered_groups))
-
     TAB_LABELS = ["硬知识", "软智慧", "问题拷问"]
     LABEL_TO_TAB = {
         "core/insight": "软智慧",
@@ -663,11 +888,69 @@ def browse():
         "core/question": "问题拷问",
         "manual/technical": "硬知识",
     }
+    SECTION_LABEL = {
+        "core/insight": "洞察",
+        "core/note": "笔记",
+        "core/question": "问题",
+        "manual/technical": "技术手册",
+    }
 
-    tab_sections = {t: [] for t in TAB_LABELS}
-    for label, groups in sections:
+    tab_data = {t: {} for t in TAB_LABELS}
+
+    for label, dirpath in BROWSE_ROOTS:
         tab = LABEL_TO_TAB.get(label, label)
-        tab_sections[tab].append((label, groups))
+        is_question = (label == "core/question")
+
+        if is_question:
+            entries = []
+            if os.path.isdir(dirpath):
+                for fn in os.listdir(dirpath):
+                    fp = os.path.join(dirpath, fn)
+                    if not os.path.isfile(fp) or not fn.endswith(".md"):
+                        continue
+                    if _is_derived_file(fn):
+                        continue
+                    title, preview = _extract_meta(fp)
+                    mtime = os.path.getmtime(fp)
+                    entries.append({"fn": fn, "title": title or (fn[:-11] if fn.endswith("_refined.md") else fn[:-3]), "preview": preview, "mtime": mtime, "rel": "%s/%s" % (label, fn)})
+            entries.sort(key=lambda e: e["mtime"], reverse=True)
+            tab_data[tab][label] = {"questions": entries}
+        else:
+            # 按 canonical_key 分组，每组精炼在上原文在下
+            entries = []
+            if os.path.isdir(dirpath):
+                for fn in os.listdir(dirpath):
+                    fp = os.path.join(dirpath, fn)
+                    if not os.path.isfile(fp) or not fn.endswith(".md"):
+                        continue
+                    if _is_derived_file(fn):
+                        continue
+                    ckey = _canonical_key(fn)
+                    role = _entry_role(fn)
+                    title, preview = _extract_meta(fp)
+                    mtime = os.path.getmtime(fp)
+                    entries.append({"fn": fn, "ckey": ckey, "role": role, "title": title or (fn[:-11] if fn.endswith("_refined.md") else fn[:-3]), "preview": preview, "mtime": mtime, "rel": "%s/%s" % (label, fn)})
+
+            # 按 canonical key 分组
+            groups = {}
+            for e in entries:
+                groups.setdefault(e["ckey"], []).append(e)
+
+            # 每组精炼优先排序
+            grouped = []
+            for ckey, items in groups.items():
+                refined_item = None
+                original_item = None
+                for e in items:
+                    if e["role"] == "refined":
+                        refined_item = e
+                    elif e["role"] == "original":
+                        original_item = e
+                latest_mtime = max(e["mtime"] for e in items)
+                grouped.append({"ckey": ckey, "refined": refined_item, "original": original_item, "mtime": latest_mtime})
+
+            grouped.sort(key=lambda g: g["mtime"], reverse=True)
+            tab_data[tab][label] = {"groups": grouped}
 
     html = BROWSE_HTML_HEAD
 
@@ -681,54 +964,51 @@ def browse():
         display = '' if tab_idx == 0 else ' style="display:none"'
         html += '<div class="tab-area" id="tab-area-%s"%s>' % (tab_name, display)
 
-        html += '<div class="filter-row"><button class="filter active" data-filter="refined">精炼</button><button class="filter" data-filter="original">原始</button><button class="filter" data-filter="all">全部</button></div>'
+        for label, ld in tab_data.get(tab_name, {}).items():
+            short_label = SECTION_LABEL.get(label, label.split("/")[-1])
 
-        for label, groups in tab_sections.get(tab_name, []):
-            total = sum(len(g) for g in groups)
-            short_label = label.split("/")[-1]
-            html += '<div class="section"><h2>%s<span class="count">%d篇</span></h2>' % (short_label, total)
-            if not groups:
-                html += '<div class="empty">（无文件）</div>'
+            if "questions" in ld:
+                qs = ld["questions"]
+                html += '<div class="section"><h2>%s<span class="count">%d篇</span></h2>' % (short_label, len(qs))
+                if not qs:
+                    html += '<div class="empty">（无文件）</div>'
+                else:
+                    for e in qs:
+                        badge_html = '<span class="badge badge-original">原始</span>'
+                        fp = os.path.join(BASE_DIR, e["rel"])
+                        if _check_answered(fp):
+                            badge_html += ' <span class="answer-badge">✓ 已回答</span>'
+                        card_html = '<a href="/view/%s" class="card original" data-type="original"><div class="card-title">%s%s</div><div class="card-meta">%s</div></a>' % (
+                            e["rel"], _html_escape(e["title"]), badge_html, _time_ago(e["mtime"]))
+                        html += '<div class="card-group">%s</div>' % card_html
             else:
-                for group in groups:
-                    group_html = ''
-                    for e in group:
-                        extra_class = " refined" if e["is_refined"] else " original"
-                        data_type = "refined" if e["is_refined"] else "original"
-
-                        badge_html = ""
-                        preview_html = ""
-                        title_display = e["title"]
-
-                        if e["is_refined"]:
-                            badge_html = '<span class="badge badge-refined">精炼</span>'
-                            title_display = "✨ " + title_display
+                groups = ld["groups"]
+                total = len(groups)
+                html += '<div class="section"><h2>%s<span class="count">%d篇</span></h2>' % (short_label, total)
+                if not groups:
+                    html += '<div class="empty">（无文件）</div>'
+                else:
+                    for g in groups:
+                        color = random.choice(CARD_COLORS)
+                        html += '<div class="card-group">'
+                        if g["refined"]:
+                            e = g["refined"]
+                            preview_html = ''
                             if e["preview"]:
                                 preview_html = '<div class="card-preview">%s</div>' % _html_escape(e["preview"])
-                        else:
-                            badge_html = '<span class="badge badge-original">原始</span>'
+                            html += '<a href="/view/%s" class="card refined" data-type="refined" style="border-left-color:%s"><div class="card-title">✨ %s <span class="badge badge-refined" style="color:%s;background:%s1a">精炼</span></div>%s<div class="card-meta">%s</div></a>' % (
+                                e["rel"], color, _html_escape(e["title"]), color, color, preview_html, _time_ago(e["mtime"]))
+                        if g["original"]:
+                            e = g["original"]
+                            html += '<a href="/view/%s" class="card original" data-type="original"><div class="card-title">%s</div><div class="card-meta">%s</div></a>' % (
+                                e["rel"], _html_escape(e["title"]), _time_ago(e["mtime"]))
+                        html += '</div>'
+                html += '</div>'
 
-                        if label == "core/question":
-                            fp = os.path.join(BASE_DIR, e["rel"])
-                            if _check_answered(fp):
-                                badge_html += ' <span class="answer-badge">✓ 已回答</span>'
-
-                        meta = '%s · %s' % (short_label, _time_ago(e["mtime"]))
-
-                        group_html += '<a href="/view/%s" class="card%s" data-type="%s"><div class="card-title">%s%s</div>%s<div class="card-meta">%s</div></a>' % (
-                            e["rel"], extra_class, data_type,
-                            _html_escape(title_display), badge_html,
-                            preview_html,
-                            meta
-                        )
-                    html += '<div class="card-group">%s</div>' % group_html
-            html += '</div>'
         html += '</div>'
 
     html += '<script>'
     html += 'document.querySelectorAll(".tab").forEach(function(t){t.addEventListener("click",function(){var n=this.dataset.tab;document.querySelectorAll(".tab").forEach(function(x){x.classList.remove("active")});this.classList.add("active");document.querySelectorAll(".tab-area").forEach(function(a){a.style.display="none"});document.getElementById("tab-area-"+n).style.display=""})});'
-    html += 'document.querySelectorAll(".filter").forEach(function(f){f.addEventListener("click",function(){var fl=this.dataset.filter;var ta=this.closest(".tab-area");ta.querySelectorAll(".filter").forEach(function(x){x.classList.remove("active")});this.classList.add("active");ta.querySelectorAll(".card-group").forEach(function(g){var cards=g.querySelectorAll(".card");var vis=false;cards.forEach(function(c){if(fl==="all"||c.dataset.type===fl){c.style.display="";vis=true}else{c.style.display="none"}});g.style.display=vis?"":"none"})})});'
-    html += 'document.querySelectorAll(".tab-area").forEach(function(ta){var af=ta.querySelector(".filter.active");if(af)af.click()})'
     html += '</script>'
 
     html += BROWSE_HTML_TAIL
@@ -831,6 +1111,47 @@ def view(filepath):
     html = html.replace("{{ answer_edit_text|safe }}", answer_edit_text)
     html = html.replace("{{ answer_filepath|safe }}", answer_filepath)
     return html
+
+
+def build_file_index():
+    """构建文件名→相对路径索引，带 5 分钟内存缓存。"""
+    now = time.time()
+    if _file_index_cache["data"] is not None and (now - _file_index_cache["timestamp"]) < _FILE_INDEX_CACHE_TTL:
+        return _file_index_cache["data"]
+
+    index = {}
+    skip_dirs = {"processing", "raw", "logs"}
+
+    for label, dirpath in BROWSE_ROOTS:
+        if not os.path.isdir(dirpath):
+            continue
+        for fn in os.listdir(dirpath):
+            fp = os.path.join(dirpath, fn)
+            # 跳过非内容子目录
+            if os.path.isdir(fp):
+                if fn in skip_dirs:
+                    continue
+                else:
+                    continue  # 只索引一级目录文件，不递归
+            if not fn.endswith(".md"):
+                continue
+            base, is_refined = _parse_filename(fn)
+            rel = "%s/%s" % (label, fn)
+            # _refined.md 优先于 .md（同名时保留精炼版路径）
+            if base not in index or is_refined:
+                index[base] = rel
+
+    _file_index_cache["data"] = index
+    _file_index_cache["timestamp"] = now
+    return index
+
+
+@app.route("/wikilink/<name>")
+def wikilink(name):
+    index = build_file_index()
+    if name in index:
+        return redirect("/view/" + index[name], code=302)
+    return redirect("/browse?q=" + name, code=302)
 
 
 def _render_markdown(text):
@@ -960,6 +1281,7 @@ def _render_markdown(text):
 
     rendered = "\n".join(out)
     rendered = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", r'<a href="\2">\1</a>', rendered)
+    rendered = re.sub(r"\[\[([^\]]+)\]\]", r'<a href="/wikilink/\1" class="wikilink">\1</a>', rendered)
     rendered = re.sub(r"`([^`]+)`", r"<code>\1</code>", rendered)
     return rendered
 

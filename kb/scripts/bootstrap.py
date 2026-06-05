@@ -28,7 +28,7 @@ REQUIRED_DIRS = [
 ]
 
 REQUIRED_FILES = {
-    os.path.join(BASE_DIR, "000_Dashboard.md"): "# Hermes KB\n\n知识库就绪。\n",
+    os.path.join(BASE_DIR, "000_Dashboard.md"): "# Xq.KB\n\n知识库就绪。\n",
     os.path.join(BASE_DIR, "scripts", "SAFEGUARD.md"): "# SAFEGUARD\n\n本文件由 bootstrap.py 自动创建。\n\n- 不允许删除已有文件\n- 不允许修改 core / manual / raw 已有内容\n- 所有操作必须记录日志\n",
     os.path.join(BASE_DIR, "logs", "index_state.json"): "{}",
 }
