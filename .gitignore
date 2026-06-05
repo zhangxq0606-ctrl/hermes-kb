@@ -10,3 +10,8 @@ public/
 *.pyc
 *.log
 .DS_Store
+
+# 密钥和自动生成文件
+kb/.env
+kb/api/index_cache.json
+kb/raw/*_source_*.md

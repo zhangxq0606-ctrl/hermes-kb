@@ -66,7 +66,7 @@ SEP = "-" * 52
 
 def main():
     print(BORDER)
-    print("  Hermes KB - Unified Pipeline")
+    print("  Xq.KB - Unified Pipeline")
     print(BORDER)
     log("PIPELINE START")
 

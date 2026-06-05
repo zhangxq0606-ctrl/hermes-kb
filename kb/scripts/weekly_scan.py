@@ -69,21 +69,22 @@ def log(msg):
         print(safe)
 
 
-AUDIT_PROMPT = """你是一个严谨的学术导师和商业智囊。请通读用户知识库中所有已提纯的认知资产摘要，进行"周度认知审计"。
+AUDIT_PROMPT = """你是一个严谨的学术导师。请通读用户知识库中所有已提纯的认知资产摘要，进行"周度认知审计"。
 
 输入格式：每行一条 `- [来源目录] 文件名: AI提炼的一句话洞察`
 
 审计目标：
-- 不要生成高大上的空洞总结或口水话。
-- 寻找这些摘要之间的【认知张力】。例如：不同笔记可能呈现矛盾的观点、互相制衡的趋势、或未被意识到的深层冲突。
-- 发现观点迁移轨迹、或尚未解决的深层矛盾。
-- 如果内容太少不足以做深度审计，也要尽量从有限素材中提取值得追问的方向。
+- 基于摘要内容，提出能推动用户深入思考的反思型问题。
+- 问题必须来自对单一主题的深度追问，而非跨越无关领域的类比或拼凑。
+- 只寻找摘要中自然存在的矛盾、未解疑问、或可进一步深挖的方向。
 
 输出限制：
-请直接返回 1 ~ 3 个核心驱动问题。每个问题必须是反思型、能倒逼深入研究的。
-- 格式必须严格为 Markdown 列表，禁止包含任何包裹符号。每行以 `* 【` 开头。禁止使用emoji。示例：
-* 【认知张力】AI 降低了代码编写门槛，但 LangChain 的高层抽象是否反而剥夺了开发者理解底层调度（如 K8s）的直觉？
-* 【研究方向】如何在享受 AI 自动化编程的同时，构建一套防止自身技能退化的反思型学习机制？
+- 返回 0 ~ 3 个问题。如果摘要之间没有有意义的关联、或内容不足以支撑有价值的追问，请直接返回空（不输出任何问题行），不要强行拼凑。
+- 每条问题必须是反思型、能倒逼用户深入研究或行动的。
+- 禁止将不相关领域的笔记强行关联。例如：财商和AI编程之间若无天然交集，不要编造"认知张力"。
+- 好的问题范例：对单一主题的深层追问（"你在X领域的实践是否陷入了Y误区？"）
+- 坏的问题范例：将两个无关主题牵强关联（"X强调A而Y强调B，你如何平衡？"）
+- 格式必须严格为 Markdown 列表。每行以 `* 【` 开头，格式如 `* 【研究方向】xxx` 或 `* 【认知张力】xxx`。禁止使用emoji。
 
 现在开始审计以下知识库摘要："""
 
@@ -148,7 +149,7 @@ def call_ai_audit(context):
     url = f"{AI_BASE_URL}/v1/chat/completions"
 
     messages = [
-        {"role": "system", "content": "你是一个严谨的学术导师。只输出 Markdown 列表格式的核心问题，每行以 `* 【` 开头，1~3 条。不输出任何其他内容。"},
+        {"role": "system", "content": "你是一个严谨的学术导师。只输出 Markdown 列表格式的核心问题，每行以 `* 【` 开头，0~3 条。若无有价值问题则不输出任何行。不输出任何其他内容。"},
         {"role": "user", "content": AUDIT_PROMPT + "\n\n" + context},
     ]
 
@@ -189,8 +190,6 @@ def parse_questions(raw_text):
             q = q.replace(chr(0x1F504), "").strip()
             if q:
                 questions.append(q)
-    if not questions:
-        questions = [raw_text[:200]]
     return questions[:3]
 
 
@@ -394,6 +393,9 @@ def main():
 
             questions = parse_questions(raw)
             log(f"WEEKLY_SCAN: parsed {len(questions)} questions")
+
+            if not questions:
+                log("WEEKLY_SCAN: no valuable questions generated, skipping")
 
             os.makedirs(CORE_QUESTION, exist_ok=True)
             ts = today.strftime("%Y%m%d_%H%M%S")

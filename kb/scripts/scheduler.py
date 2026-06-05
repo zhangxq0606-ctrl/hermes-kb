@@ -80,7 +80,7 @@ def check_main_py():
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Hermes Pipeline Scheduler")
+    parser = argparse.ArgumentParser(description="Xq.KB Pipeline Scheduler")
     parser.add_argument(
         "--test",
         action="store_true",
@@ -107,7 +107,7 @@ def main():
         hour=20,
         day="*/2",
         id="hermes_pipeline",
-        name="Hermes Pipeline",
+        name="Xq.KB Pipeline",
         replace_existing=True,
     )
     
