@@ -62,6 +62,25 @@ nav a { font-size: 14px; }
 .doc-card .doc-preview { font-size: 13px; color: #9ca3af; line-height: 1.5; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .doc-card .doc-info { font-size: 11px; color: #d1d5db; margin-top: 8px; display: flex; gap: 12px; align-items: center; }
 
+.card-list { display: flex; flex-direction: column; gap: 12px; }
+.card-group { border-radius: 10px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,.06); background: #fff; }
+.card { display: block; padding: 14px 16px; text-decoration: none; color: #374151; transition: background .12s; }
+.card:hover { background: #f8fafc; text-decoration: none; }
+.card:not(:last-child) { border-bottom: 1px solid #f3f4f6; }
+.card-refined { border-left: 3px solid; padding-left: 13px; }
+.card-refined:hover { background: #f0f4ff; }
+.card-original { background: #fafafa; padding: 8px 16px; border-left: 3px solid #e5e7eb; }
+.card-original:hover { background: #f3f4f6; }
+.card-original .card-title { font-size: 13px; font-weight: 400; color: #6b7280; }
+.card-original .card-preview { display: none; }
+.card-original .card-meta { font-size: 11px; color: #d1d5db; }
+.card-title { font-size: 15px; font-weight: 600; color: #1a1a2e; margin-bottom: 4px; display: flex; align-items: center; gap: 8px; }
+.card-title .badge { display: inline-block; font-size: 10px; font-weight: 600; padding: 1px 7px; border-radius: 8px; white-space: nowrap; flex-shrink: 0; }
+.badge-refined { }
+.badge-original { color: #9ca3af; background: #f3f4f6; }
+.card-preview { font-size: 13px; color: #9ca3af; line-height: 1.5; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; margin-bottom: 6px; }
+.card-meta { font-size: 12px; color: #d1d5db; }
+
 .empty-state { text-align: center; padding: 40px 0; color: #d1d5db; font-size: 14px; }
 
 .content { background: #fff; border-radius: 12px; padding: 24px 20px; box-shadow: 0 1px 3px rgba(0,0,0,.05); line-height: 1.8; }
@@ -245,31 +264,91 @@ def extract_meta(filepath):
     return title, preview
 
 
+def _is_derived_file(fn):
+    """排除系统派生文件：tech_/insight_ 分裂产物和 _source_ URL冷备。"""
+    name = fn[:-3] if fn.endswith(".md") else fn
+    if name.startswith("tech_") or name.startswith("insight_"):
+        return True
+    if "_source_" in name:
+        return True
+    return False
+
+
+def _find_original_file(dirpath, slug):
+    """寻找与 slug 对应的原始 .md 文件（非 _refined）。"""
+    candidates = [
+        os.path.join(dirpath, f"{slug}.md"),
+        os.path.join(dirpath, f"{slug}.txt"),
+    ]
+    for fp in candidates:
+        if os.path.isfile(fp):
+            return fp
+    return None
+
+
 def discover_docs():
-    docs = {key: [] for key in CATEGORIES}
+    groups = {key: [] for key in CATEGORIES}
     for key, cfg in CATEGORIES.items():
         dirpath = cfg["path"]
         if not os.path.isdir(dirpath):
             continue
-        for fn in sorted(os.listdir(dirpath)):
-            if not fn.endswith("_refined.md"):
+
+        # 扫描 base slugs：从 _refined.md 和普通 .md 收集
+        base_slugs = set()
+        for fn in os.listdir(dirpath):
+            if not (fn.endswith(".md") or fn.endswith(".txt")):
                 continue
-            fp = os.path.join(dirpath, fn)
-            if not os.path.isfile(fp):
+            if _is_derived_file(fn):
                 continue
-            title, preview = extract_meta(fp)
-            slug = fn.rsplit("_refined.md", 1)[0]
-            mtime = os.path.getmtime(fp)
-            docs[key].append({
-                "slug": slug,
-                "title": title,
-                "preview": preview,
-                "mtime": mtime,
-                "filepath": fp,
-                "rel_url": f"/detail/{key}/{slug}.html",
-            })
-        docs[key].sort(key=lambda d: d["mtime"], reverse=True)
-    return docs
+            name = fn.rsplit(".", 1)[0]
+            if name.endswith("_refined"):
+                base_slugs.add(name[:-8])
+            else:
+                base_slugs.add(name)
+
+        for slug in sorted(base_slugs):
+            refined_path = os.path.join(dirpath, f"{slug}_refined.md")
+            original_path = _find_original_file(dirpath, slug)
+
+            if os.path.isfile(refined_path):
+                title, preview = extract_meta(refined_path)
+                mtime = os.path.getmtime(refined_path)
+                group = {
+                    "slug": slug,
+                    "title": title,
+                    "preview": preview,
+                    "mtime": mtime,
+                    "refined": {
+                        "filepath": refined_path,
+                        "rel_url": f"/detail/{key}/{slug}.html",
+                    },
+                    "original": None,
+                }
+                if original_path:
+                    group["original"] = {
+                        "filepath": original_path,
+                        "rel_url": f"/detail/{key}/{slug}_original.html",
+                    }
+                groups[key].append(group)
+            elif original_path:
+                # 只有原文，没有精炼版
+                title, preview = extract_meta(original_path)
+                mtime = os.path.getmtime(original_path)
+                group = {
+                    "slug": slug,
+                    "title": title,
+                    "preview": preview,
+                    "mtime": mtime,
+                    "refined": None,
+                    "original": {
+                        "filepath": original_path,
+                        "rel_url": f"/detail/{key}/{slug}_original.html",
+                    },
+                }
+                groups[key].append(group)
+
+        groups[key].sort(key=lambda g: g["mtime"], reverse=True)
+    return groups
 
 
 def _time_str(timestamp):
@@ -346,29 +425,54 @@ window.addEventListener('DOMContentLoaded', function() {
     print(f"  {path}")
 
 
+CARD_COLORS = [
+    "#2563eb", "#d97706", "#7c3aed", "#059669", "#dc2626",
+    "#0891b2", "#c026d3", "#65a30d", "#e11d48", "#4f46e5",
+]
+
+
 def generate_browse(docs):
+    import random
+
     for key, cfg in CATEGORIES.items():
-        items = docs.get(key, [])
+        groups = docs.get(key, [])
         path = os.path.join(PUBLIC_DIR, "browse", f"{key}.html")
         os.makedirs(os.path.dirname(path), exist_ok=True)
 
         list_html = ""
-        if not items:
+        if not groups:
             list_html = '<div class="empty-state">暂无文档</div>'
         else:
-            for d in items:
-                list_html += f"""<a class="doc-card" href="{d['rel_url']}">
-  <div class="doc-title">{html_escape(d['title'])}</div>
-  <div class="doc-preview">{html_escape(d['preview'])}</div>
-  <div class="doc-info"><span>{_time_str(d['mtime'])}</span><span>{cfg['label']}</span></div>
+            for g in groups:
+                color = random.choice(CARD_COLORS)
+                list_html += '<div class="card-group">'
+
+                if g.get("refined"):
+                    d = g["refined"]
+                    preview_html = ""
+                    if g.get("preview"):
+                        preview_html = '<div class="card-preview">%s</div>' % html_escape(g["preview"])
+                    list_html += f"""<a class="card card-refined" href="{d['rel_url']}" style="border-left-color:{color}">
+  <div class="card-title">✨ {html_escape(g['title'])} <span class="badge badge-refined" style="color:{color};background:{color}1a">精炼</span></div>
+  {preview_html}
+  <div class="card-meta">{_time_str(g['mtime'])}</div>
 </a>"""
+
+                if g.get("original"):
+                    d = g["original"]
+                    list_html += f"""<a class="card card-original" href="{d['rel_url']}">
+  <div class="card-title">{html_escape(g['title'])} <span class="badge badge-original">原文</span></div>
+  <div class="card-meta">{_time_str(g['mtime'])}</div>
+</a>"""
+
+                list_html += '</div>'
 
         html = make_head(cfg["label"], "/") + f"""
 <header class="browse-header">
   <h1>{cfg["label"]}</h1>
-  <p>{len(items)} 篇文档</p>
+  <p>{len(groups)} 篇</p>
 </header>
-<div class="doc-list">
+<div class="card-list">
   {list_html}
 </div>
 """ + make_foot()
@@ -381,37 +485,84 @@ def generate_browse(docs):
 def generate_detail(docs):
     # 构建 slug → rel_url 映射表，用于 wikilinks 编译期查表替换
     slug_to_url = {}
-    for key, items in docs.items():
-        for d in items:
-            slug_to_url[d['slug']] = d['rel_url']
+    for key, groups in docs.items():
+        for g in groups:
+            if g.get("refined"):
+                slug_to_url[g["slug"]] = g["refined"]["rel_url"]
+            elif g.get("original"):
+                slug_to_url[g["slug"]] = g["original"]["rel_url"]
 
-    for key, items in docs.items():
-        for d in items:
-            path = os.path.join(PUBLIC_DIR, "detail", key, f"{d['slug']}.html")
-            os.makedirs(os.path.dirname(path), exist_ok=True)
-
-            try:
-                with open(d["filepath"], "r", encoding="utf-8") as f:
-                    raw = f.read()
-            except Exception:
-                raw = "（无法读取文件）"
-
-            content = _render_detail_markdown(raw, slug_map=slug_to_url)
-
+    for key, groups in docs.items():
+        for g in groups:
             cat_label = CATEGORIES[key]["label"]
-            html = make_head(d["title"] + " - Xq.KB", f"/browse/{key}.html") + f"""
+
+            # 生成精炼版详情页
+            if g.get("refined"):
+                d = g["refined"]
+                detail_path = os.path.join(PUBLIC_DIR, "detail", key, f"{g['slug']}.html")
+                os.makedirs(os.path.dirname(detail_path), exist_ok=True)
+
+                try:
+                    with open(d["filepath"], "r", encoding="utf-8") as f:
+                        raw = f.read()
+                except Exception:
+                    raw = "（无法读取文件）"
+
+                content = _render_detail_markdown(raw, slug_map=slug_to_url)
+
+                # 如果有原文，添加原文链接
+                original_link = ""
+                if g.get("original"):
+                    original_link = f'<div style="margin-top:16px;padding-top:12px;border-top:1px solid #f3f4f6;"><a href="{g["original"]["rel_url"]}" style="font-size:14px;color:#9ca3af;">← 查看原文</a></div>'
+
+                html = make_head(g["title"] + " - Xq.KB", f"/browse/{key}.html") + f"""
 <header class="browse-header">
-  <h1>{html_escape(d['title'])}</h1>
-  <p>{cat_label} · {_time_str(d['mtime'])}</p>
+  <h1>{html_escape(g['title'])}</h1>
+  <p>{cat_label} · {_time_str(g['mtime'])} · 精炼版</p>
 </header>
 <div class="content">
 {content}
 </div>
+{original_link}
 """ + make_foot()
 
-            with open(path, "w", encoding="utf-8") as f:
-                f.write(html)
-            print(f"  {path}")
+                with open(detail_path, "w", encoding="utf-8") as f:
+                    f.write(html)
+                print(f"  {detail_path}")
+
+            # 生成原文详情页
+            if g.get("original"):
+                d = g["original"]
+                detail_path = os.path.join(PUBLIC_DIR, "detail", key, f"{g['slug']}_original.html")
+                os.makedirs(os.path.dirname(detail_path), exist_ok=True)
+
+                try:
+                    with open(d["filepath"], "r", encoding="utf-8") as f:
+                        raw = f.read()
+                except Exception:
+                    raw = "（无法读取文件）"
+
+                content = _render_detail_markdown(raw, slug_map=slug_to_url)
+
+                # 如果有精炼版，添加精炼版链接
+                refined_link = ""
+                if g.get("refined"):
+                    refined_link = f'<div style="margin-top:16px;padding-top:12px;border-top:1px solid #f3f4f6;"><a href="{g["refined"]["rel_url"]}" style="font-size:14px;color:#2563eb;">← 查看精炼版</a></div>'
+
+                html = make_head(g["title"] + " - Xq.KB", f"/browse/{key}.html") + f"""
+<header class="browse-header">
+  <h1>{html_escape(g['title'])}</h1>
+  <p>{cat_label} · {_time_str(g['mtime'])} · 原文</p>
+</header>
+<div class="content">
+{content}
+</div>
+{refined_link}
+""" + make_foot()
+
+                with open(detail_path, "w", encoding="utf-8") as f:
+                    f.write(html)
+                print(f"  {detail_path}")
 
 
 def _render_detail_markdown(text, slug_map=None):
