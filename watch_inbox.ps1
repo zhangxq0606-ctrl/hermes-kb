@@ -9,6 +9,18 @@ $serverHost = "116.62.220.41"
 $sshKey = "C:\Users\qqmin06\.ssh\trae_deploy_key"
 $sshOpts = "-i $sshKey -o StrictHostKeyChecking=no"
 
+# 互斥锁
+$lockFile = "$scriptDir\.sync.lock"
+if (Test-Path $lockFile) {
+    $lockPid = Get-Content $lockFile -ErrorAction SilentlyContinue
+    $proc = Get-Process -Id $lockPid -ErrorAction SilentlyContinue
+    if ($proc) {
+        Write-Host "[watch] 已有同步进程(PID:$lockPid)在运行，退出"
+        exit 0
+    }
+}
+$PID | Set-Content $lockFile -ErrorAction SilentlyContinue
+
 Write-Host "[watch] 开始监控 inbox: $inboxDir"
 Write-Host "[watch] 有新文件会自动处理，Ctrl+C 停止"
 
@@ -30,22 +42,35 @@ $action = {
     
     Set-Location $using:scriptDir
     
-    # 0) 从服务器拉取 Claude Code 写的文件
+    # 0) 从服务器拉取 Claude Code 写的文件（检查更新时间）
     Write-Host "[$(Get-Date -Format 'HH:mm:ss')] 拉取服务器文件..."
     $serverDirs = @('/var/www/hermes-kb/kb/writing', '/var/www/hermes-kb/kb/core/insight', '/var/www/hermes-kb/kb/core/note', '/var/www/hermes-kb/kb/manual/technical')
     foreach ($sdir in $serverDirs) {
         $localDir = $sdir -replace '/var/www/hermes-kb/', 'D:\hermes-kb\'
         $localDir = $localDir -replace '/', '\'
         if (-not (Test-Path $localDir)) { New-Item -ItemType Directory -Path $localDir -Force | Out-Null }
-        $remoteList = ssh $using:sshOpts root@$using:serverHost "ls $sdir/*.md 2>/dev/null" 2>&1
+        $remoteList = ssh $using:sshOpts root@$using:serverHost "ls -la $sdir/*.md 2>/dev/null" 2>&1
         foreach ($rf in $remoteList) {
             $rf = ($rf.ToString()).Trim()
-            if ($rf -eq '' -or $rf -match '^ssh:|^Warning:|^Pseudo') { continue }
-            $fname = Split-Path $rf -Leaf
+            if ($rf -eq '' -or $rf -match '^ssh:|^Warning:|^Pseudo|^#|^total') { continue }
+            $parts = $rf -split '\s+'
+            if ($parts.Count -lt 9) { continue }
+            $fname = $parts[-1]
+            $remoteMtime = "$($parts[5]) $($parts[6]) $($parts[7])"
             $dest = Join-Path $localDir $fname
+            $needDownload = $false
             if (-not (Test-Path $dest)) {
-                scp $using:sshOpts "root@$($using:serverHost):${rf}" $dest 2>&1 | Out-Null
-                Write-Host "  + $fname"
+                $needDownload = $true
+            } else {
+                $localMtime = (Get-Item $dest).LastWriteTime.ToString("MMM dd HH:mm")
+                if ($remoteMtime -ne $localMtime) {
+                    $needDownload = $true
+                }
+            }
+            if ($needDownload) {
+                $fullPath = "$sdir/$fname"
+                scp $using:sshOpts "root@$($using:serverHost):${fullPath}" $dest 2>&1 | Out-Null
+                Write-Host "  + $fname (updated)"
             }
         }
     }
@@ -81,4 +106,5 @@ finally {
     Unregister-Event $onCreated.Id -ErrorAction SilentlyContinue
     Unregister-Event $onRenamed.Id -ErrorAction SilentlyContinue
     $watcher.Dispose()
+    Remove-Item $lockFile -ErrorAction SilentlyContinue
 }
