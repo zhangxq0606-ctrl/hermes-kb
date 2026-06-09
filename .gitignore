@@ -15,3 +15,7 @@ public/
 kb/.env
 kb/api/index_cache.json
 kb/raw/*_source_*.md
+
+# Syncthing 元数据
+.stfolder/
+kb/inbox/.stfolder/
