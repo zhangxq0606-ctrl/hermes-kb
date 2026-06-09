@@ -8,19 +8,6 @@ Set-Location $scriptDir
 
 Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] 开始同步..."
 
-# 0) 先从服务器拉取变更
-Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] 拉取服务器变更..."
-$env:GIT_SSH_COMMAND = "ssh -i C:/Users/qqmin06/.ssh/trae_deploy_key -o StrictHostKeyChecking=no"
-git fetch server main 2>&1
-if (git rev-parse --verify --quiet server/main) {
-    $mergeCmd = "git merge -Xtheirs --no-edit server/main 2>&1"
-    Invoke-Expression $mergeCmd
-}
-
-# 1) 再从 GitHub 拉取远程更新
-Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] 拉取 GitHub 更新..."
-git pull origin main --rebase=false 2>&1
-
 # 1) 跑 Pipeline
 Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] 执行 Pipeline..."
 $result = python "$scriptDir\kb\main.py" 2>&1
