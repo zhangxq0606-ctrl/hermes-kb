@@ -14,12 +14,13 @@ git add -A 2>>$LOG
 if ! git diff --cached --quiet; then
   git commit -m "auto: server sync $(date '+%Y-%m-%d %H:%M')" >>$LOG 2>&1
   echo "[$(date '+%Y-%m-%d %H:%M:%S')] committed local changes" >>$LOG
+  touch .last_sync
 fi
 
-# 3) pull latest
+# 3) pull latest from GitHub (via ghproxy)
 git pull origin main >>$LOG 2>&1
 
-# 4) build static
+# 4) build static website
 cd kb/scripts
 python3 build_static.py >>$LOG 2>&1
 
