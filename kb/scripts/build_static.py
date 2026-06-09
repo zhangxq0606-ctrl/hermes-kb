@@ -366,7 +366,6 @@ def make_head(title, back_url=None):
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{html_escape(title)} - Xq.KB</title>
 <link rel="stylesheet" href="/assets/style.css">
-<script src="/pagefind/pagefind-ui.js"></script>
 </head>
 <body>
 <div class="container">
@@ -609,7 +608,7 @@ def main():
 
     total = sum(len(v) for v in docs.values())
     print(f"\n[build_static] 完成: {total} 篇文档, 输出至 {PUBLIC_DIR}")
-    print("[build_static] 提示: 运行 'npx pagefind --site public' 生成搜索索引")
+
 
 
 if __name__ == "__main__":
