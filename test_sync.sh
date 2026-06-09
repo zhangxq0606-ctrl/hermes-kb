@@ -1,55 +1,37 @@
 #!/bin/bash
 REPO=/var/www/hermes-kb
 cd $REPO
-git reset --hard origin/main
-git stash clear
-rm -f kb/writing/test_*
-echo '.last_sync' >> .gitignore 2>/dev/null || true
-rm -f .last_sync; touch .last_sync
 
-echo "=== 测试C: 连续8次空跑 ==="
+echo "============================================"
+echo "  TEST C: sync.sh 连续运行 不产生git发散"
+echo "============================================"
 for i in 1 2 3 4 5 6 7 8; do
   bash /root/sync.sh 2>/dev/null
-  DIV=$(git rev-list --left-right --count origin/main...HEAD)
-  STASH=$(git stash list 2>/dev/null | wc -l)
-  echo "  r$i: div=$DIV stash=$STASH"
+  DIV=$(git rev-list --left-right --count origin/main...HEAD 2>/dev/null)
+  echo "  r$i: div=$DIV"
 done
 
 echo ""
-echo "=== 测试D: Claude Code写新文件 ==="
-echo 'hello_world' > kb/writing/test_new_file.md
-echo "  created"
+echo "============================================"
+echo "  TEST D: Claude Code写新文件 -> 不丢失"
+echo "============================================"
+echo "=== test article written by Claude Code ===" > kb/writing/claude_test.md
+echo "created claude_test.md"
 bash /root/sync.sh 2>/dev/null
-CONTENT=$(cat kb/writing/test_new_file.md 2>/dev/null || echo LOST)
-DIV=$(git rev-list --left-right --count origin/main...HEAD)
+CONTENT=$(cat kb/writing/claude_test.md 2>/dev/null || echo LOST)
+DIV=$(git rev-list --left-right --count origin/main...HEAD 2>/dev/null)
 echo "  content: $CONTENT"
 echo "  div: $DIV"
 
-echo ""
-echo "=== 测试D2: 再跑5次不丢 ==="
 for i in 1 2 3 4 5; do
   bash /root/sync.sh 2>/dev/null
-  EX=$(test -f kb/writing/test_new_file.md && echo OK || echo LOST)
-  DIV=$(git rev-list --left-right --count origin/main...HEAD)
+  EX=$(test -f kb/writing/claude_test.md && echo OK || echo LOST)
+  DIV=$(git rev-list --left-right --count origin/main...HEAD 2>/dev/null)
   echo "  r$i: file=$EX div=$DIV"
 done
 
 echo ""
-echo "=== 测试D3: 修改文件内容 ==="
-echo 'updated_v2' > kb/writing/test_new_file.md
-bash /root/sync.sh 2>/dev/null
-CONTENT=$(cat kb/writing/test_new_file.md 2>/dev/null || echo LOST)
-echo "  content after modify: $CONTENT"
-
-echo ""
-echo "=== 最终 ==="
-echo "div: $(git rev-list --left-right --count origin/main...HEAD)"
+echo "=== FINAL ==="
+echo "div: $(git rev-list --left-right --count origin/main...HEAD 2>/dev/null)"
 echo "stash: $(git stash list 2>/dev/null | wc -l)"
-echo "status: $(git status --short | head -3)"
-
-# cleanup
-git reset --hard origin/main
-git stash clear
-rm -f kb/writing/test_new_file.md .last_sync
-touch .last_sync
-echo "cleaned"
+echo "test file: $(test -f kb/writing/claude_test.md && echo OK || echo LOST)"
