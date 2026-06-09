@@ -18,11 +18,11 @@ $watcher.Filter = "*.md"
 $watcher.IncludeSubdirectories = $false
 $watcher.EnableRaisingEvents = $true
 
-$lastRun = [DateTime]::MinValue
+$global:lastRun = [DateTime]::MinValue
 
 $action = {
     $now = Get-Date
-    if (($now - ($global:lastRun)).TotalSeconds -lt 30) { return }
+    if (($now - $global:lastRun).TotalSeconds -lt 30) { return }
     $global:lastRun = $now
     
     Write-Host ""

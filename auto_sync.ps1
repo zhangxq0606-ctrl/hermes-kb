@@ -1,5 +1,5 @@
 # Hermes KB 自动同步脚本
-# 服务器→本地用 scp，本地→GitHub→服务器用 git
+# 服务器->本地用 scp，本地->GitHub->服务器用 git
 
 $ErrorActionPreference = "Continue"
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -37,11 +37,12 @@ git pull origin main --rebase=false 2>&1
 
 # 2) 跑 Pipeline
 Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] 执行 Pipeline..."
-$result = python "$scriptDir\kb\main.py" 2>&1
+& python "$scriptDir\kb\main.py" 2>&1 | ForEach-Object { Write-Host $_ }
+
 if ($LASTEXITCODE -ne 0) {
-    Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Pipeline 失败，跳过 push"
+    Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Pipeline failed, skip push"
 }
-Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Pipeline 完成"
+Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Pipeline done"
 
 # 3) git add + commit + push
 git add -A 2>&1 | Out-Null
@@ -49,7 +50,7 @@ git diff --cached --quiet 2>&1
 if ($LASTEXITCODE -ne 0) {
     git commit -m "auto: sync $(Get-Date -Format 'yyyy-MM-dd HH:mm')" 2>&1 | Out-Null
     git push origin main 2>&1
-    Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] 推送成功！"
+    Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Pushed to GitHub"
 } else {
-    Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] 无变更，跳过推送。"
+    Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] No changes, skip push"
 }
