@@ -20,7 +20,7 @@ foreach ($sdir in $serverDirs) {
     if (-not (Test-Path $localDir)) { New-Item -ItemType Directory -Path $localDir -Force | Out-Null }
     $remoteList = ssh $sshOpts root@$serverHost "ls $sdir/*.md 2>/dev/null" 2>&1
     foreach ($rf in $remoteList) {
-        $rf = $rf.Trim()
+        $rf = ($rf.ToString()).Trim()
         if ($rf -eq '' -or $rf -match '^ssh:|^Warning:|^Pseudo|^#') { continue }
         $fname = Split-Path $rf -Leaf
         $dest = Join-Path $localDir $fname
