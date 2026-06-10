@@ -1,5 +1,5 @@
 # Hermes KB 自动同步脚本
-# 服务器->本地用 scp，本地->GitHub->服务器用 git
+# 服务器->本地用 scp，本地运行管线后回推到服务器 + GitHub
 
 $ErrorActionPreference = "Continue"
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -62,11 +62,15 @@ try {
     Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] 拉取 GitHub 更新..."
     git pull origin main --rebase=false 2>&1 | Out-Null
 
-    # 2) 跑 Pipeline
+    # 2) 跑 Pipeline（引擎 + 编译器）
     Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] 执行 Pipeline..."
     & python "$scriptDir\kb\main.py" 2>&1 | Select-Object -Last 5
 
     Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Pipeline done"
+
+    # 2.5) 重建静态站
+    Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] 重建静态站..."
+    & python "$scriptDir\kb\scripts\build_static.py" 2>&1 | Select-Object -Last 3
 
     # 3) git add + commit + push
     git add -A 2>&1 | Out-Null
@@ -78,6 +82,28 @@ try {
     } else {
         Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] No changes, skip push"
     }
+
+    # 4) 回推产出到服务器（topic + refined + 脚本 + api + 静态站）
+    Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] 回推产物到服务器..."
+    $pushDirs = @(
+        @{local="D:\hermes-kb\public\"; remote="/var/www/hermes-kb/public/"},
+        @{local="D:\hermes-kb\kb\core\topic\*"; remote="/var/www/hermes-kb/kb/core/topic/"},
+        @{local="D:\hermes-kb\kb\core\insight\*_refined.md"; remote="/var/www/hermes-kb/kb/core/insight/"},
+        @{local="D:\hermes-kb\kb\manual\technical\*_refined.md"; remote="/var/www/hermes-kb/kb/manual/technical/"},
+        @{local="D:\hermes-kb\kb\scripts\*.py"; remote="/var/www/hermes-kb/kb/scripts/"},
+        @{local="D:\hermes-kb\kb\api\*.py"; remote="/var/www/hermes-kb/kb/api/"},
+        @{local="D:\hermes-kb\kb\main.py"; remote="/var/www/hermes-kb/kb/main.py"},
+        @{local="D:\hermes-kb\CLAUDE.md"; remote="/var/www/hermes-kb/CLAUDE.md"}
+    )
+    foreach ($pd in $pushDirs) {
+        scp -r $sshOpts $pd.local "root@${serverHost}:$($pd.remote)" 2>&1 | Out-Null
+    }
+    Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] 产物推送完成"
+
+    # 5) 服务器端重载 nginx
+    Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] 重载服务器 nginx..."
+    ssh $sshOpts root@$serverHost "nginx -s reload" 2>&1 | Out-Null
+    Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] 同步完成"
 } finally {
     Remove-Item $lockFile -ErrorAction SilentlyContinue
 }

@@ -1,5 +1,6 @@
 .syncthing/
 nssm/
+cloudflared.exe
 kb/cloudflared*
 kb/logs/
 kb/models/
