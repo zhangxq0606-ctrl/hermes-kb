@@ -83,22 +83,10 @@ try {
         Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] No changes, skip push"
     }
 
-    # 4) 回推产出到服务器（topic + refined + 脚本 + api + 静态站）
-    Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] 回推产物到服务器..."
-    $pushDirs = @(
-        @{local="D:\hermes-kb\public\"; remote="/var/www/hermes-kb/public/"},
-        @{local="D:\hermes-kb\kb\core\topic\*"; remote="/var/www/hermes-kb/kb/core/topic/"},
-        @{local="D:\hermes-kb\kb\core\insight\*_refined.md"; remote="/var/www/hermes-kb/kb/core/insight/"},
-        @{local="D:\hermes-kb\kb\manual\technical\*_refined.md"; remote="/var/www/hermes-kb/kb/manual/technical/"},
-        @{local="D:\hermes-kb\kb\scripts\*.py"; remote="/var/www/hermes-kb/kb/scripts/"},
-        @{local="D:\hermes-kb\kb\api\*.py"; remote="/var/www/hermes-kb/kb/api/"},
-        @{local="D:\hermes-kb\kb\main.py"; remote="/var/www/hermes-kb/kb/main.py"},
-        @{local="D:\hermes-kb\CLAUDE.md"; remote="/var/www/hermes-kb/CLAUDE.md"}
-    )
-    foreach ($pd in $pushDirs) {
-        scp -r $sshOpts $pd.local "root@${serverHost}:$($pd.remote)" 2>&1 | Out-Null
-    }
-    Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] 产物推送完成"
+    # 4) 回推静态站到服务器（nginx 纯静态，只需 public/）
+    Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] 回推静态站到服务器..."
+    scp -r $sshOpts "D:\hermes-kb\public\" "root@${serverHost}:/var/www/hermes-kb/public/" 2>&1 | Out-Null
+    Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] 静态站推送完成"
 
     # 5) 服务器端重载 nginx
     Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] 重载服务器 nginx..."
