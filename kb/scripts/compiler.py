@@ -199,9 +199,7 @@ def extract_topic_title(markdown_content):
 
 
 def write_topic(markdown_content, tag):
-    topic_title = extract_topic_title(markdown_content)
-    safe_title = safe_filename(topic_title)
-    filename = f"topic_{safe_title}.md"
+    filename = f"topic_{tag}.md"
     filepath = os.path.join(TOPIC_DIR, filename)
 
     # 确保链接格式修正, 去掉可能残留的 _refined 后缀
