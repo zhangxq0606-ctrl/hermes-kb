@@ -17,6 +17,7 @@ STEPS = [
     {"name": "HERMES_ENGINE", "script": "hermes_engine.py", "parse_json": True, "critical": False},
     {"name": "INDEX_GUARD", "script": "index_guard.py", "parse_json": True, "critical": False},
     {"name": "WEEKLY_SCAN", "script": "weekly_scan.py", "parse_json": False, "critical": False},
+    {"name": "COMPILER", "script": "compiler.py", "parse_json": True, "critical": False},
 ]
 
 os.makedirs(LOGS_DIR, exist_ok=True)
@@ -75,12 +76,13 @@ def main():
         "engine": None,
         "index_guard": None,
         "weekly_scan": "ok",
+        "compiler": None,
     }
     pipeline_ok = True
 
     for i, step in enumerate(STEPS, 1):
         script = os.path.join(SCRIPTS_DIR, step["script"])
-        print(f"\n[{i}/4] {step['name']} - {step['script']}")
+        print(f"\n[{i}/5] {step['name']} - {step['script']}")
         print(SEP)
 
         try:
@@ -158,6 +160,9 @@ def main():
         print(f"  Index Guard : scanned={ig.get('scanned_files')} changed={ig.get('changed_files')} updated={ig.get('updated_index')}")
     if report.get("weekly_scan"):
         print(f"  Weekly Scan : {report['weekly_scan']}")
+    if report.get("compiler"):
+        c = report["compiler"]
+        print(f"  Compiler    : compiled={c.get('compiled_count')} topics={c.get('topics')}")
 
     print(f"\n  System Healthy: {pipeline_ok}")
     print(BORDER)

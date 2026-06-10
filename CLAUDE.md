@@ -25,6 +25,16 @@ d:\hermes-kb\kb\
 - `weekly_scan.py` — 周度审计和问题生成
 - Flat Web 服务是手机端访问入口，不干扰它
 
+## 检索策略
+
+**Claude Code 是首选检索入口。** 当用户提问需要查知识库时，按以下优先级读取：
+
+1. **先查 `core/topic/`** — 编译后的主题页（综合结论），这是最快获取全貌的入口
+2. **再查 `core/insight/_refined.md` / `manual/technical/_refined.md`** — 单篇精炼笔记
+3. **最后查 `raw/`** — 原始材料，仅在需要核对事实来源时查阅
+
+问答引擎（/chat、/ask）是移动端应急通道。
+
 ## 协作规范
 
 - **启动任务先查skill**：每项任务开始时，先检查 `.claude/skills/` 下有无匹配的 skill 文件，有则按 skill 定义的工作流执行，而非凭默认行为操作。

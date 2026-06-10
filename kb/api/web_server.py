@@ -18,6 +18,7 @@ app = Flask(__name__)
 
 BASE_DIR = qa_engine.BASE_DIR
 BROWSE_ROOTS = [
+    ("core/topic", os.path.join(BASE_DIR, "core", "topic")),
     ("core/insight", os.path.join(BASE_DIR, "core", "insight")),
     ("core/note", os.path.join(BASE_DIR, "core", "note")),
     ("core/question", os.path.join(BASE_DIR, "core", "question")),
@@ -491,9 +492,10 @@ header a { font-size: 14px; color: #2563eb; text-decoration: none; }
 header a:hover { text-decoration: underline; }
 
 .tab-bar { display: flex; gap: 4px; margin-bottom: 16px; border-bottom: 2px solid #f3f4f6; }
-.tab { flex: 1; padding: 10px 4px; background: none; border: none; border-bottom: 2px solid transparent; margin-bottom: -2px; font-size: 14px; color: #9ca3af; cursor: pointer; transition: color .2s, border-color .2s; }
+.tab { flex: 1; padding: 10px 4px; background: none; border: none; border-bottom: 2px solid transparent; margin-bottom: -2px; font-size: 14px; color: #9ca3af; cursor: pointer; transition: color .2s, border-color .2s; text-decoration: none; text-align: center; display: inline-block; }
 .tab:hover { color: #6b7280; }
 .tab.active { color: #2563eb; border-bottom-color: #2563eb; font-weight: 600; }
+.tab.active[data-tab="编译论点"] { color: #d97706; border-bottom-color: #d97706; }
 .tab.active[data-tab="硬知识"] { color: #2563eb; border-bottom-color: #2563eb; }
 .tab.active[data-tab="软智慧"] { color: #d97706; border-bottom-color: #d97706; }
 .tab.active[data-tab="问题拷问"] { color: #7c3aed; border-bottom-color: #7c3aed; }
@@ -881,14 +883,16 @@ def _extract_answer(fp):
 
 @app.route("/browse")
 def browse():
-    TAB_LABELS = ["硬知识", "软智慧", "问题拷问"]
+    TAB_LABELS = ["编译论点", "硬知识", "软智慧", "问题拷问"]
     LABEL_TO_TAB = {
+        "core/topic": "编译论点",
         "core/insight": "软智慧",
         "core/note": "软智慧",
         "core/question": "问题拷问",
         "manual/technical": "硬知识",
     }
     SECTION_LABEL = {
+        "core/topic": "主题页",
         "core/insight": "洞察",
         "core/note": "笔记",
         "core/question": "问题",
@@ -899,9 +903,22 @@ def browse():
 
     for label, dirpath in BROWSE_ROOTS:
         tab = LABEL_TO_TAB.get(label, label)
+        is_topic = (label == "core/topic")
         is_question = (label == "core/question")
 
-        if is_question:
+        if is_topic:
+            entries = []
+            if os.path.isdir(dirpath):
+                for fn in os.listdir(dirpath):
+                    fp = os.path.join(dirpath, fn)
+                    if not os.path.isfile(fp) or not fn.endswith(".md") or not fn.startswith("topic_"):
+                        continue
+                    title, preview = _extract_meta(fp)
+                    mtime = os.path.getmtime(fp)
+                    entries.append({"fn": fn, "title": title or fn[:-3], "preview": preview, "mtime": mtime, "rel": "%s/%s" % (label, fn)})
+            entries.sort(key=lambda e: e["mtime"], reverse=True)
+            tab_data[tab][label] = {"topics": entries}
+        elif is_question:
             entries = []
             if os.path.isdir(dirpath):
                 for fn in os.listdir(dirpath):
@@ -953,66 +970,77 @@ def browse():
             tab_data[tab][label] = {"groups": grouped}
 
     html = BROWSE_HTML_HEAD
+    selected_tab = request.args.get("tab", "编译论点")
+    if selected_tab not in TAB_LABELS:
+        selected_tab = TAB_LABELS[0]
 
     html += '<div class="tab-bar">'
-    for i, tab in enumerate(TAB_LABELS):
-        active = ' active' if i == 0 else ''
-        html += '<button class="tab%s" data-tab="%s">%s</button>' % (active, tab, tab)
+    for tab in TAB_LABELS:
+        active = ' active' if tab == selected_tab else ''
+        html += '<a class="tab%s" data-tab="%s" href="/browse?tab=%s">%s</a>' % (active, tab, tab, tab)
     html += '</div>'
 
-    for tab_idx, tab_name in enumerate(TAB_LABELS):
-        display = '' if tab_idx == 0 else ' style="display:none"'
-        html += '<div class="tab-area" id="tab-area-%s"%s>' % (tab_name, display)
+    html += '<div class="tab-area">'
+    for label, ld in tab_data.get(selected_tab, {}).items():
+        short_label = SECTION_LABEL.get(label, label.split("/")[-1])
 
-        for label, ld in tab_data.get(tab_name, {}).items():
-            short_label = SECTION_LABEL.get(label, label.split("/")[-1])
-
-            if "questions" in ld:
-                qs = ld["questions"]
-                html += '<div class="section"><h2>%s<span class="count">%d篇</span></h2>' % (short_label, len(qs))
-                if not qs:
-                    html += '<div class="empty">（无文件）</div>'
-                else:
-                    for e in qs:
-                        badge_html = '<span class="badge badge-original">原始</span>'
-                        fp = os.path.join(BASE_DIR, e["rel"])
-                        if _check_answered(fp):
-                            badge_html += ' <span class="answer-badge">✓ 已回答</span>'
-                        card_html = '<a href="/view/%s" class="card original" data-type="original"><div class="card-title">%s%s</div><div class="card-meta">%s</div></a>' % (
-                            e["rel"], _html_escape(e["title"]), badge_html, _time_ago(e["mtime"]))
-                        html += '<div class="card-group">%s</div>' % card_html
+        if "topics" in ld:
+            topics = ld["topics"]
+            html += '<div class="section"><h2>%s<span class="count">%d篇</span></h2>' % (short_label, len(topics))
+            if not topics:
+                html += '<div class="empty">（无文件）</div>'
             else:
-                groups = ld["groups"]
-                total = len(groups)
-                html += '<div class="section"><h2>%s<span class="count">%d篇</span></h2>' % (short_label, total)
-                if not groups:
-                    html += '<div class="empty">（无文件）</div>'
-                else:
-                    for g in groups:
-                        color = random.choice(CARD_COLORS)
-                        html += '<div class="card-group">'
-                        if g["refined"]:
-                            e = g["refined"]
-                            preview_html = ''
-                            if e["preview"]:
-                                preview_html = '<div class="card-preview">%s</div>' % _html_escape(e["preview"])
-                            html += '<a href="/view/%s" class="card refined" data-type="refined" style="border-left-color:%s"><div class="card-title">✨ %s <span class="badge badge-refined" style="color:%s;background:%s1a">精炼</span></div>%s<div class="card-meta">%s</div></a>' % (
-                                e["rel"], color, _html_escape(e["title"]), color, color, preview_html, _time_ago(e["mtime"]))
-                        if g["original"]:
-                            e = g["original"]
-                            html += '<a href="/view/%s" class="card original" data-type="original"><div class="card-title">%s</div><div class="card-meta">%s</div></a>' % (
-                                e["rel"], _html_escape(e["title"]), _time_ago(e["mtime"]))
-                        html += '</div>'
-                html += '</div>'
+                for e in topics:
+                    preview_html = ''
+                    if e["preview"]:
+                        preview_html = '<div class="card-preview">%s</div>' % _html_escape(e["preview"])
+                    card_html = '<a href="/view/%s" class="card refined" style="border-left-color:#d97706"><div class="card-title">📖 %s</div>%s<div class="card-meta">%s</div></a>' % (
+                        e["rel"], _html_escape(e["title"]), preview_html, _time_ago(e["mtime"]))
+                    html += '<div class="card-group">%s</div>' % card_html
+        elif "questions" in ld:
+            qs = ld["questions"]
+            html += '<div class="section"><h2>%s<span class="count">%d篇</span></h2>' % (short_label, len(qs))
+            if not qs:
+                html += '<div class="empty">（无文件）</div>'
+            else:
+                for e in qs:
+                    badge_html = '<span class="badge badge-original">原始</span>'
+                    fp = os.path.join(BASE_DIR, e["rel"])
+                    if _check_answered(fp):
+                        badge_html += ' <span class="answer-badge">✓ 已回答</span>'
+                    card_html = '<a href="/view/%s" class="card original" data-type="original"><div class="card-title">%s%s</div><div class="card-meta">%s</div></a>' % (
+                        e["rel"], _html_escape(e["title"]), badge_html, _time_ago(e["mtime"]))
+                    html += '<div class="card-group">%s</div>' % card_html
+        else:
+            groups = ld["groups"]
+            total = len(groups)
+            html += '<div class="section"><h2>%s<span class="count">%d篇</span></h2>' % (short_label, total)
+            if not groups:
+                html += '<div class="empty">（无文件）</div>'
+            else:
+                for g in groups:
+                    color = random.choice(CARD_COLORS)
+                    html += '<div class="card-group">'
+                    if g["refined"]:
+                        e = g["refined"]
+                        preview_html = ''
+                        if e["preview"]:
+                            preview_html = '<div class="card-preview">%s</div>' % _html_escape(e["preview"])
+                        html += '<a href="/view/%s" class="card refined" data-type="refined" style="border-left-color:%s"><div class="card-title">✨ %s <span class="badge badge-refined" style="color:%s;background:%s1a">精炼</span></div>%s<div class="card-meta">%s</div></a>' % (
+                            e["rel"], color, _html_escape(e["title"]), color, color, preview_html, _time_ago(e["mtime"]))
+                    if g["original"]:
+                        e = g["original"]
+                        html += '<a href="/view/%s" class="card original" data-type="original"><div class="card-title">%s</div><div class="card-meta">%s</div></a>' % (
+                            e["rel"], _html_escape(e["title"]), _time_ago(e["mtime"]))
+                    html += '</div>'
+            html += '</div>'
 
-        html += '</div>'
-
-    html += '<script>'
-    html += 'document.querySelectorAll(".tab").forEach(function(t){t.addEventListener("click",function(){var n=this.dataset.tab;document.querySelectorAll(".tab").forEach(function(x){x.classList.remove("active")});this.classList.add("active");document.querySelectorAll(".tab-area").forEach(function(a){a.style.display="none"});document.getElementById("tab-area-"+n).style.display=""})});'
-    html += '</script>'
+    html += '</div>'
 
     html += BROWSE_HTML_TAIL
-    return html
+    resp = app.make_response(html)
+    resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+    return resp
 
 
 @app.route("/answer/save", methods=["POST"])

@@ -25,6 +25,7 @@ REQUIRED_DIRS = [
     os.path.join(BASE_DIR, "scripts"),
     os.path.join(BASE_DIR, "core", "question"),
     os.path.join(BASE_DIR, "core", "note"),
+    os.path.join(BASE_DIR, "core", "topic"),
 ]
 
 REQUIRED_FILES = {

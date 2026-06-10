@@ -9,6 +9,7 @@ ROOT_DIR = os.path.dirname(BASE_DIR)
 PUBLIC_DIR = os.path.join(ROOT_DIR, "public")
 
 CATEGORIES = {
+    "topic": {"path": os.path.join(BASE_DIR, "core", "topic"), "label": "编译论点"},
     "insight": {"path": os.path.join(BASE_DIR, "core", "insight"), "label": "软智慧"},
     "technical": {"path": os.path.join(BASE_DIR, "manual", "technical"), "label": "硬知识"},
     "question": {"path": os.path.join(BASE_DIR, "core", "question"), "label": "问题拷问"},
@@ -40,6 +41,8 @@ nav a { font-size: 14px; }
 .cat-card--technical:hover { background: #f0f4ff; }
 .cat-card--question { border-left-color: #7c3aed; }
 .cat-card--question:hover { background: #f8f4ff; }
+.cat-card--topic { border-left-color: #d97706; }
+.cat-card--topic:hover { background: #fdf6ee; }
 .cat-card .cat-icon { font-size: 22px; flex-shrink: 0; }
 .cat-card .cat-name { font-size: 16px; font-weight: 600; color: #1a1a2e; }
 .cat-card .cat-desc { margin-left: auto; font-size: 12px; color: #9ca3af; }
@@ -293,6 +296,28 @@ def discover_docs():
         if not os.path.isdir(dirpath):
             continue
 
+        # topic 独立处理：每篇 topic_*.md 是独立卡片
+        if key == "topic":
+            for fn in sorted(os.listdir(dirpath)):
+                if not fn.endswith(".md") or not fn.startswith("topic_"):
+                    continue
+                fp = os.path.join(dirpath, fn)
+                if not os.path.isfile(fp):
+                    continue
+                title, preview = extract_meta(fp)
+                mtime = os.path.getmtime(fp)
+                slug = fn.rsplit(".", 1)[0]
+                groups[key].append({
+                    "slug": slug,
+                    "title": title or slug,
+                    "preview": preview,
+                    "mtime": mtime,
+                    "refined": {"filepath": fp, "rel_url": f"/detail/{key}/{slug}.html"},
+                    "original": None,
+                })
+            groups[key].sort(key=lambda g: g["mtime"], reverse=True)
+            continue
+
         # 扫描 base slugs：从 _refined.md 和普通 .md 收集
         base_slugs = set()
         for fn in os.listdir(dirpath):
@@ -388,8 +413,8 @@ def generate_index(docs):
     cats_html = ""
     for key, cfg in CATEGORIES.items():
         count = len(docs.get(key, []))
-        icons = {"insight": "💡", "technical": "⚙️", "question": "❓"}
-        descs = {"insight": "洞察 · 认知 · 思维框架", "technical": "工具 · 命令 · 实操方法", "question": "反思 · 追问 · 深度思考"}
+        icons = {"topic": "📖", "insight": "💡", "technical": "⚙️", "question": "❓"}
+        descs = {"topic": "综合 · 编译 · 主题结论", "insight": "洞察 · 认知 · 思维框架", "technical": "工具 · 命令 · 实操方法", "question": "反思 · 追问 · 深度思考"}
         cats_html += f"""<a class="cat-card cat-card--{key}" href="/browse/{key}.html">
   <span class="cat-icon">{icons.get(key, "")}</span>
   <span class="cat-name">{cfg["label"]}</span>
@@ -441,6 +466,18 @@ def generate_browse(docs):
         list_html = ""
         if not groups:
             list_html = '<div class="empty-state">暂无文档</div>'
+        elif key == "topic":
+            for g in groups:
+                if g.get("refined"):
+                    d = g["refined"]
+                    preview_html = ""
+                    if g.get("preview"):
+                        preview_html = '<div class="card-preview">%s</div>' % html_escape(g["preview"])
+                    list_html += f"""<a class="card card-refined" href="{d['rel_url']}" style="border-left-color:#d97706">
+  <div class="card-title">📖 {html_escape(g['title'])}</div>
+  {preview_html}
+  <div class="card-meta">{_time_str(g['mtime'])}</div>
+</a>"""
         else:
             for g in groups:
                 color = random.choice(CARD_COLORS)
