@@ -348,7 +348,7 @@ def safe_filename(name):
     return safe
 
 
-def call_ai_compile(members, tag, subgroup_idx):
+def call_ai_compile(members, tag, subgroup_idx, today):
     import urllib.request
     import urllib.error
 
@@ -356,6 +356,9 @@ def call_ai_compile(members, tag, subgroup_idx):
         raise RuntimeError("DEEPSEEK_API_KEY not configured")
 
     url = f"{AI_BASE_URL}/v1/chat/completions"
+
+    # Replace {当前日期} placeholder with actual date
+    system_content = COMPILER_SYSTEM.replace("{当前日期}", today)
 
     user_parts = []
     for i, m in enumerate(members, 1):
@@ -385,7 +388,7 @@ def call_ai_compile(members, tag, subgroup_idx):
     user_msg = "\n".join(user_parts)
 
     messages = [
-        {"role": "system", "content": COMPILER_SYSTEM},
+        {"role": "system", "content": system_content},
         {"role": "user", "content": user_msg},
     ]
 
@@ -451,7 +454,7 @@ def main():
         for idx, members in enumerate(subgroups):
             log(f"COMPILING: tag={tag} subgroup={idx + 1}/{len(subgroups)} members={len(members)}")
             try:
-                md = call_ai_compile(members, tag, idx)
+                md = call_ai_compile(members, tag, idx, today)
             except Exception as e:
                 log(f"  COMPILE_FAIL tag={tag} idx={idx}: {e}")
                 continue
