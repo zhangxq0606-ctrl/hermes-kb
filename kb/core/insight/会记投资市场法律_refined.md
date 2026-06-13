@@ -19,4 +19,3 @@ related:
 
 [相关：财商的修炼](财商的修炼.md)
 > 标签: principle
-
