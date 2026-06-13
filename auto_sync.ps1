@@ -1,4 +1,4 @@
-# Hermes KB 自动同步脚本
+﻿# Hermes KB 自动同步脚本
 # 服务器->本地用 scp，本地运行管线后回推到服务器 + GitHub
 
 $ErrorActionPreference = "Continue"
@@ -8,7 +8,7 @@ Set-Location $scriptDir
 # 互斥锁：防止 auto_sync 和 watch_inbox 并发运行
 $lockFile = "$scriptDir\.sync.lock"
 if (Test-Path $lockFile) {
-    $lockPid = Get-Content $lockFile -ErrorAction SilentlyContinue
+    $lockPid = [int](Get-Content $lockFile -ErrorAction SilentlyContinue)
     $proc = Get-Process -Id $lockPid -ErrorAction SilentlyContinue
     if ($proc) {
         Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] 已有同步进程(PID:$lockPid)在运行，跳过"
@@ -16,6 +16,8 @@ if (Test-Path $lockFile) {
     }
 }
 $PID | Set-Content $lockFile -ErrorAction SilentlyContinue
+
+$python = "C:\Users\qqmin06\python-sdk\python3.13.2\python.exe"
 
 try {
     Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] 开始同步..."
@@ -64,13 +66,13 @@ try {
 
     # 2) 跑 Pipeline（引擎 + 编译器）
     Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] 执行 Pipeline..."
-    & python "$scriptDir\kb\main.py" 2>&1 | Select-Object -Last 5
+    & $python "$scriptDir\kb\main.py" 2>&1 | Select-Object -Last 5
 
     Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Pipeline done"
 
     # 2.5) 重建静态站
     Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] 重建静态站..."
-    & python "$scriptDir\kb\scripts\build_static.py" 2>&1 | Select-Object -Last 3
+    & $python "$scriptDir\kb\scripts\build_static.py" 2>&1 | Select-Object -Last 3
 
     # 3) git add + commit + push
     git add -A 2>&1 | Out-Null
@@ -85,7 +87,7 @@ try {
 
     # 4) 回推静态站到服务器（nginx 纯静态，只需 public/）
     Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] 回推静态站到服务器..."
-    scp -r $sshOpts "D:\hermes-kb\public\" "root@${serverHost}:/var/www/hermes-kb/public/" 2>&1 | Out-Null
+    scp -r $sshOpts "D:\hermes-kb\public" "root@${serverHost}:/var/www/hermes-kb/public/" 2>&1 | Out-Null
     Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] 静态站推送完成"
 
     # 5) 服务器端重载 nginx
