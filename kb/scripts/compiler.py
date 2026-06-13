@@ -3,6 +3,8 @@ import sys
 import re
 import json
 import logging
+import yaml
+import numpy as np
 from datetime import datetime, timezone, timedelta
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -25,6 +27,9 @@ COMPILER_LOG = os.path.join(BASE_DIR, "logs", "compiler.log")
 AI_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "")
 AI_BASE_URL = os.environ.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
 AI_MODEL = os.environ.get("DEEPSEEK_MODEL", "deepseek-chat")
+
+MAX_GROUP_SIZE = 7
+SIMILARITY_THRESHOLD = 0.5
 
 os.makedirs(TOPIC_DIR, exist_ok=True)
 os.makedirs(os.path.dirname(COMPILER_LOG), exist_ok=True)
@@ -81,6 +86,22 @@ def log(msg):
     print(line)
 
 
+def parse_frontmatter(text):
+    """Parse YAML frontmatter from text. Returns (frontmatter_dict, body_text).
+    If no valid frontmatter found, falls back to {} and returns full text as body.
+    """
+    if text.startswith('---'):
+        parts = text.split('---', 2)
+        if len(parts) >= 3:
+            try:
+                fm = yaml.safe_load(parts[1])
+                if isinstance(fm, dict):
+                    return fm, parts[2].strip()
+            except yaml.YAMLError:
+                pass
+    return {}, text
+
+
 def scan_refined():
     entries = []
     for scan_dir in SCAN_DIRS:
@@ -97,9 +118,28 @@ def scan_refined():
                     content = f.read()
             except Exception:
                 continue
-            tag_match = TAG_PATTERN.search(content)
-            tag = tag_match.group(1).strip() if tag_match else "unlabeled"
-            entries.append({"path": fp, "filename": fn, "content": content, "tag": tag})
+
+            # Parse frontmatter first (new format), fallback to regex (old format)
+            fm, body = parse_frontmatter(content)
+            if fm and "usage_tag" in fm:
+                tag = fm["usage_tag"]
+            else:
+                tag_match = TAG_PATTERN.search(content)
+                tag = tag_match.group(1).strip() if tag_match else "unlabeled"
+
+            related = []
+            if fm and "related" in fm:
+                raw = fm["related"]
+                if isinstance(raw, list):
+                    related = raw
+
+            entries.append({
+                "path": fp,
+                "filename": fn,
+                "content": content,
+                "tag": tag,
+                "related": related,
+            })
     log(f"SCAN: found {len(entries)} refined notes")
     return entries
 
@@ -133,15 +173,173 @@ def inherit_tags(entries):
 
 
 def cluster_by_tag(entries):
+    """Group entries by tag, then split large groups (>7) into subgroups."""
     groups = {}
     for e in entries:
         tag = e["tag"]
         if tag == "unlabeled":
             continue
         groups.setdefault(tag, []).append(e)
-    compilable = {tag: members for tag, members in groups.items() if len(members) >= 2}
-    log(f"CLUSTER: {len(compilable)} compilable groups (tags: {list(compilable.keys())})")
+
+    # Filter out groups with < 2 members
+    compilable = {}
+    for tag, members in groups.items():
+        if len(members) < 2:
+            continue
+        if len(members) <= MAX_GROUP_SIZE:
+            compilable[tag] = [members]
+        else:
+            log(f"CLUSTER: tag={tag} has {len(members)} notes (>={MAX_GROUP_SIZE+1}), splitting...")
+            subgroups = sub_cluster_by_related(members)
+
+            # Detect if related signal is weak/absent: >50% entries are isolated singletons
+            isolated_count = sum(1 for sg in subgroups if len(sg) <= 1)
+            weak_related = isolated_count > len(members) * 0.5
+
+            # Also check if any subgroup oversize
+            oversize = any(len(sg) > MAX_GROUP_SIZE for sg in subgroups)
+
+            if weak_related or oversize:
+                if weak_related:
+                    log(f"  RELATED_SPLIT weak signal (tag={tag}): {isolated_count}/{len(members)} isolated, falling back to similarity")
+                else:
+                    log(f"  RELATED_SPLIT oversize for tag={tag}, falling back to similarity")
+                subgroups = _sub_cluster_by_similarity(members)
+
+            # Final safety: split any oversize subgroup arbitrarily
+            final_subgroups = []
+            for sg in subgroups:
+                for k in range(0, len(sg), MAX_GROUP_SIZE):
+                    chunk = sg[k:k + MAX_GROUP_SIZE]
+                    if len(chunk) >= 2:
+                        final_subgroups.append(chunk)
+            compilable[tag] = final_subgroups
+            log(f"  SPLIT_RESULT tag={tag}: {len(members)} notes -> {len(final_subgroups)} subgroups " +
+                f"(sizes: {[len(sg) for sg in final_subgroups]})")
+
+    total_groups = sum(len(sgs) for sgs in compilable.values())
+    tags_str = ", ".join(f"{tag}({len(sgs)}组)" for tag, sgs in compilable.items())
+    log(f"CLUSTER: {total_groups} total compilable groups ({tags_str})")
     return compilable
+
+
+def sub_cluster_by_related(members):
+    """Split a list of members into subgroups using frontmatter.related BFS.
+    Returns list of subgroups (each subgroup is a list of members).
+    """
+    # Build filename -> index mapping
+    fn_to_idx = {}
+    for i, m in enumerate(members):
+        fn = m["filename"]
+        if fn.endswith("_refined.md"):
+            fn = fn[:-11]
+        fn_to_idx[fn] = i
+
+    # Build adjacency graph from related connections
+    adj = {i: set() for i in range(len(members))}
+    for i, m in enumerate(members):
+        related = m.get("related", [])
+        for rel in related:
+            rel_fn = ""
+            if isinstance(rel, dict):
+                rel_fn = rel.get("file", "")
+            elif isinstance(rel, str):
+                rel_fn = rel
+            if rel_fn and rel_fn in fn_to_idx:
+                j = fn_to_idx[rel_fn]
+                if i != j:
+                    adj[i].add(j)
+                    adj[j].add(i)
+
+    # BFS for connected components
+    visited = set()
+    components = []
+    for i in range(len(members)):
+        if i not in visited:
+            comp = []
+            stack = [i]
+            while stack:
+                node = stack.pop()
+                if node not in visited:
+                    visited.add(node)
+                    comp.append(node)
+                    stack.extend(adj[node] - visited)
+            components.append(comp)
+
+    # Isolated nodes with no related edges: each becomes its own subgroup
+    result = []
+    for comp in components:
+        group = [members[i] for i in comp]
+        result.append(group)
+
+    return result
+
+
+def _sub_cluster_by_similarity(members):
+    """Use semantic_index embeddings to compute pairwise similarities
+    and split into subgroups (each ≤ MAX_GROUP_SIZE).
+    """
+    if len(members) <= MAX_GROUP_SIZE:
+        return [members]
+
+    # Get embeddings
+    embeddings = []
+    for m in members:
+        try:
+            vec = semantic_index.embed(m["content"][:2000])
+        except Exception:
+            vec = []
+        embeddings.append(vec)
+
+    embeddings = np.array(embeddings)
+    norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
+    norms[norms == 0] = 1
+    embeddings = embeddings / norms
+
+    # Build similarity matrix and adjacency graph
+    sim_matrix = np.dot(embeddings, embeddings.T)
+
+    adj = {i: set() for i in range(len(members))}
+    for i in range(len(members)):
+        for j in range(i + 1, len(members)):
+            if sim_matrix[i][j] >= SIMILARITY_THRESHOLD:
+                adj[i].add(j)
+                adj[j].add(i)
+
+    # BFS connected components
+    visited = set()
+    components = []
+    for i in range(len(members)):
+        if i not in visited:
+            comp = []
+            stack = [i]
+            while stack:
+                node = stack.pop()
+                if node not in visited:
+                    visited.add(node)
+                    comp.append(node)
+                    stack.extend(adj[node] - visited)
+            components.append(comp)
+
+    # Split any component > MAX_GROUP_SIZE arbitrarily
+    result = []
+    for comp in components:
+        if len(comp) <= MAX_GROUP_SIZE:
+            result.append([members[i] for i in comp])
+        else:
+            comp_members = [members[i] for i in comp]
+            for k in range(0, len(comp_members), MAX_GROUP_SIZE):
+                result.append(comp_members[k:k + MAX_GROUP_SIZE])
+
+    # Fallback: if >50% isolated singletons, split arbitrarily
+    isolated = sum(1 for sg in result if len(sg) <= 1)
+    if isolated > len(members) * 0.5 and len(members) > MAX_GROUP_SIZE:
+        log(f"  SIMILARITY_SPLIT insufficient ({isolated}/{len(members)} isolated), falling back to arbitrary split")
+        result = []
+        for k in range(0, len(members), MAX_GROUP_SIZE):
+            result.append(members[k:k + MAX_GROUP_SIZE])
+
+    return result
 
 
 def safe_filename(name):
@@ -150,7 +348,7 @@ def safe_filename(name):
     return safe
 
 
-def call_ai_compile(members, tag):
+def call_ai_compile(members, tag, subgroup_idx):
     import urllib.request
     import urllib.error
 
@@ -164,7 +362,25 @@ def call_ai_compile(members, tag):
         title = m["filename"]
         if title.endswith("_refined.md"):
             title = title[:-11]
-        user_parts.append(f"【笔记 {i}】\n标题：{title}\n标签：{tag}\n内容：\n{m['content']}\n")
+
+        # Include related links if available
+        related_info = ""
+        related = m.get("related", [])
+        if related:
+            related_titles = []
+            for rel in related:
+                if isinstance(rel, dict):
+                    related_titles.append(rel.get("title", rel.get("file", "")))
+                elif isinstance(rel, str):
+                    related_titles.append(rel)
+            if related_titles:
+                related_info = f"关联笔记：{', '.join(related_titles[:5])}"
+
+        content_block = f"标题：{title}\n标签：{tag}\n"
+        if related_info:
+            content_block += f"{related_info}\n"
+        content_block += f"内容：\n{m['content']}\n"
+        user_parts.append(f"【笔记 {i}】\n{content_block}")
 
     user_msg = "\n".join(user_parts)
 
@@ -198,11 +414,11 @@ def extract_topic_title(markdown_content):
     return "untitled"
 
 
-def write_topic(markdown_content, tag):
-    filename = f"topic_{tag}.md"
+def write_topic(markdown_content, tag, subgroup_idx=0):
+    filename = f"topic_{tag}.md" if subgroup_idx == 0 else f"topic_{tag}_{subgroup_idx + 1}.md"
     filepath = os.path.join(TOPIC_DIR, filename)
 
-    # 确保链接格式修正, 去掉可能残留的 _refined 后缀
+    # Ensure link format: remove _refined suffix
     markdown_content = re.sub(r'\[([^\]]+)\]\(([^)]+)_refined\.md\)', r'[\1](\2.md)', markdown_content)
 
     with open(filepath, "w", encoding="utf-8") as f:
@@ -231,15 +447,16 @@ def main():
         return
 
     topics = []
-    for tag, members in groups.items():
-        log(f"COMPILING: tag={tag} members={len(members)}")
-        try:
-            md = call_ai_compile(members, tag)
-        except Exception as e:
-            log(f"  COMPILE_FAIL: {e}")
-            continue
-        filename = write_topic(md, tag)
-        topics.append(filename)
+    for tag, subgroups in groups.items():
+        for idx, members in enumerate(subgroups):
+            log(f"COMPILING: tag={tag} subgroup={idx + 1}/{len(subgroups)} members={len(members)}")
+            try:
+                md = call_ai_compile(members, tag, idx)
+            except Exception as e:
+                log(f"  COMPILE_FAIL tag={tag} idx={idx}: {e}")
+                continue
+            filename = write_topic(md, tag, idx)
+            topics.append(filename)
 
     log(f"COMPILER_DONE: compiled={len(topics)} topics={topics}")
     print(json.dumps({"compiled_count": len(topics), "topics": topics}, ensure_ascii=False))

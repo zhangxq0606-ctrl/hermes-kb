@@ -8,6 +8,7 @@ import logging
 import urllib.request
 import concurrent.futures
 import time
+import yaml
 from datetime import datetime, timezone, timedelta
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -352,6 +353,146 @@ def ai_classify_and_score(content):
     return json.loads(reply)
 
 
+def parse_frontmatter(text):
+    """Parse YAML frontmatter from text. Returns (frontmatter_dict, body_text).
+    If no valid frontmatter found, falls back to {} and returns full text as body.
+    """
+    if text.startswith('---'):
+        parts = text.split('---', 2)
+        if len(parts) >= 3:
+            try:
+                fm = yaml.safe_load(parts[1])
+                if isinstance(fm, dict):
+                    return fm, parts[2].strip()
+            except yaml.YAMLError:
+                pass
+    return {}, text
+
+
+def _update_frontmatter_field(filepath, field, value):
+    """Update a specific field in a file's frontmatter in-place."""
+    with open(filepath, 'r', encoding='utf-8', errors='replace') as f:
+        text = f.read()
+
+    fm, body = parse_frontmatter(text)
+    fm[field] = value
+
+    fm_str = yaml.dump(fm, allow_unicode=True, default_flow_style=False, sort_keys=False).strip()
+    full = f"---\n{fm_str}\n---\n\n{body}\n"
+
+    with open(filepath, 'w', encoding='utf-8') as f:
+        f.write(full)
+
+
+def _add_to_related(filepath, new_entry):
+    """Add a new_entry to file's frontmatter.related, avoiding duplicates."""
+    with open(filepath, 'r', encoding='utf-8', errors='replace') as f:
+        text = f.read()
+
+    fm, body = parse_frontmatter(text)
+    existing = fm.get("related", [])
+    if not existing:
+        existing = []
+
+    if not any(isinstance(e, dict) and e.get("file") == new_entry["file"] for e in existing):
+        existing.append(new_entry)
+        fm["related"] = existing
+
+        fm_str = yaml.dump(fm, allow_unicode=True, default_flow_style=False, sort_keys=False).strip()
+        full = f"---\n{fm_str}\n---\n\n{body}\n"
+
+        with open(filepath, 'w', encoding='utf-8') as f:
+            f.write(full)
+
+
+def compute_related(refined_path, usage_tag, filename):
+    """Scan core/insight/ and manual/technical/ for _refined.md files,
+    compute relatedness score, and bidirectionally write frontmatter.related.
+
+    Scoring rules:
+      - same usage_tag: +3
+      - filename character overlap >= 3: +1
+    Total >= 3 triggers bidirectional related link.
+    """
+    if not os.path.exists(refined_path):
+        log(f"COMPUTE_RELATED: {refined_path} not found, skipping")
+        return
+
+    base_name = os.path.splitext(filename)[0]
+    new_refined_name = f"{base_name}_refined.md"
+
+    # Read the new file to get its title
+    with open(refined_path, 'r', encoding='utf-8', errors='replace') as f:
+        new_text = f.read()
+
+    new_fm, new_body = parse_frontmatter(new_text)
+    title_match = re.search(r'^#\s+(.+)$', new_body, re.MULTILINE)
+    new_title = title_match.group(1).strip() if title_match else base_name
+
+    directories = [CORE_INSIGHT, MANUAL_TECH]
+    matches = []
+
+    for directory in directories:
+        if not os.path.isdir(directory):
+            continue
+        for fname in sorted(os.listdir(directory)):
+            if not fname.endswith('_refined.md'):
+                continue
+            if fname == new_refined_name:
+                continue
+
+            fpath = os.path.join(directory, fname)
+            try:
+                with open(fpath, 'r', encoding='utf-8', errors='replace') as fh:
+                    text = fh.read()
+            except Exception:
+                continue
+
+            # Parse frontmatter (new format) or fallback to old format
+            fm, body = parse_frontmatter(text)
+            if fm and 'usage_tag' in fm:
+                other_tag = fm['usage_tag']
+            else:
+                tag_match = re.search(r'>\s*标签:\s*(\S+)', text)
+                other_tag = tag_match.group(1) if tag_match else ''
+
+            # Get title
+            t_match = re.search(r'^#\s+(.+)$', body if fm else text, re.MULTILINE)
+            other_title = t_match.group(1).strip() if t_match else fname.replace('_refined.md', '')
+
+            # Scoring
+            score = 0
+            if other_tag == usage_tag:
+                score += 3
+
+            overlap = len(set(base_name) & set(fname.replace('_refined.md', '')))
+            if overlap >= 3:
+                score += 1
+
+            if score >= 3:
+                matches.append({
+                    "file": fname.replace('_refined.md', ''),
+                    "title": other_title,
+                    "score": score,
+                    "path": fpath,
+                })
+
+    if not matches:
+        log(f"COMPUTE_RELATED {refined_path}: no matches found")
+        return
+
+    # Update the new file's frontmatter with related
+    related_list = [{"file": m["file"], "title": m["title"]} for m in matches]
+    _update_frontmatter_field(refined_path, "related", related_list)
+
+    # Update each matched file's frontmatter to include the new file
+    new_entry = {"file": base_name, "title": new_title}
+    for m in matches:
+        _add_to_related(m["path"], new_entry)
+
+    log(f"COMPUTE_RELATED {refined_path}: {len(matches)} related entries written bidirectionally")
+
+
 def route_file(result, src, filename):
     kt = result.get("knowledge_type", "soft")
     tech_score = result.get("technical_score", 0)
@@ -385,6 +526,7 @@ def route_file(result, src, filename):
 
     if refined:
         refined_name = f"{os.path.splitext(filename)[0]}_refined.md"
+        written_refined_paths = []
         for d in targets:
             if d == MANUAL_TECH and tech_split:
                 content_to_write = tech_split
@@ -392,8 +534,19 @@ def route_file(result, src, filename):
                 content_to_write = insight_split
             else:
                 content_to_write = refined
-            with open(os.path.join(d, refined_name), "w", encoding="utf-8") as f:
-                f.write(content_to_write + f"\n\n> ⏱️ 时效性: {timeliness}\n> 标签: {usage_tag}\n")
+
+            refined_path = os.path.join(d, refined_name)
+            # Write with YAML frontmatter
+            fm_data = {"timeliness": timeliness, "usage_tag": usage_tag}
+            fm_str = yaml.dump(fm_data, allow_unicode=True, default_flow_style=False, sort_keys=False).strip()
+            full = f"---\n{fm_str}\n---\n\n{content_to_write.strip()}\n"
+            with open(refined_path, "w", encoding="utf-8") as f:
+                f.write(full)
+            written_refined_paths.append(refined_path)
+
+        # Compute related notes and update frontmatter bidirectionally
+        if written_refined_paths:
+            compute_related(written_refined_paths[0], usage_tag, filename)
 
     if kt == "mixed" and cog_score >= 5 and tech_split and insight_split:
         base = os.path.splitext(filename)[0]
