@@ -1,5 +1,7 @@
 ---
-related: []
+related:
+- file: 红绿灯
+  title: 红绿灯
 ---
 
 🎯 【一句话洞察】

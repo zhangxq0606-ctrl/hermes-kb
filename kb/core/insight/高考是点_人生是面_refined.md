@@ -2,6 +2,8 @@
 related:
 - file: test_财商投资笔记
   title: test_财商投资笔记
+- file: 红绿灯
+  title: 红绿灯
 ---
 
 🎯 【一句话洞察】
