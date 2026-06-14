@@ -505,6 +505,8 @@ header a:hover { text-decoration: underline; }
 .section { margin-bottom: 24px; }
 .section h2 { font-size: 13px; font-weight: 600; color: #9ca3af; padding: 8px 0; margin-bottom: 10px; border-bottom: 1px solid #f3f4f6; display: flex; align-items: center; gap: 8px; text-transform: uppercase; letter-spacing: .5px; }
 .section h2 .count { font-size: 11px; font-weight: 400; color: #9ca3af; background: #f3f4f6; padding: 2px 8px; border-radius: 10px; }
+.tag-header { font-size: 14px; font-weight: 600; color: #374151; margin: 16px 0 8px 0; padding: 4px 8px; background: #f9fafb; border-radius: 6px; display: flex; align-items: center; gap: 8px; }
+.tag-header .count { font-size: 11px; font-weight: 400; color: #9ca3af; background: #e5e7eb; padding: 1px 8px; border-radius: 10px; }
 .section .empty { color: #d1d5db; font-size: 14px; padding: 16px 0; text-align: center; }
 
 .card-group { margin-bottom: 10px; border-radius: 10px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,.06); background: #fff; }
@@ -849,6 +851,29 @@ def _extract_meta(fp):
     return title, "\n".join(preview_lines)
 
 
+TAG_ORDER = ["principle", "tool", "reflection", "opinion", "case", "reference"]
+TAG_LABEL = {
+    "principle": "💡 认知/方法论",
+    "tool": "🔧 工具型资源",
+    "reflection": "🪞 自我反思",
+    "opinion": "🗣 观点/评论",
+    "case": "📋 案例/复盘",
+    "reference": "📎 参考资料",
+}
+
+
+def _extract_usage_tag(fp):
+    try:
+        with open(fp, "r", encoding="utf-8", errors="replace") as f:
+            for line in f:
+                m = re.match(r'>\s*标签:\s*(\S+)', line.strip())
+                if m:
+                    return m.group(1)
+    except Exception:
+        pass
+    return None
+
+
 def _time_ago(timestamp):
     diff = time.time() - timestamp
     if diff < 60:
@@ -973,6 +998,7 @@ def browse():
 
             # 每组精炼优先排序
             grouped = []
+            tag_map = {}
             for ckey, items in groups.items():
                 refined_item = None
                 original_item = None
@@ -982,10 +1008,30 @@ def browse():
                     elif e["role"] == "original":
                         original_item = e
                 latest_mtime = max(e["mtime"] for e in items)
-                grouped.append({"ckey": ckey, "refined": refined_item, "original": original_item, "mtime": latest_mtime})
+                # 从 refined 文件提取 usage_tag
+                tag = None
+                if refined_item:
+                    refined_fp = os.path.join(BASE_DIR, refined_item["rel"])
+                    tag = _extract_usage_tag(refined_fp)
+                if not tag:
+                    tag = "uncategorized"
+                tag_map.setdefault(tag, []).append({
+                    "ckey": ckey, "refined": refined_item, "original": original_item, "mtime": latest_mtime
+                })
 
-            grouped.sort(key=lambda g: g["mtime"], reverse=True)
-            tab_data[tab][label] = {"groups": grouped}
+            # 按 tag 分组排序，同 tag 内按 mtime 降序
+            grouped = []
+            for tag in TAG_ORDER:
+                items = tag_map.pop(tag, [])
+                if not items:
+                    continue
+                items.sort(key=lambda x: x["mtime"], reverse=True)
+                grouped.append({"tag": tag, "items": items})
+            # 未识别的 tag 放最后
+            for tag, items in tag_map.items():
+                items.sort(key=lambda x: x["mtime"], reverse=True)
+                grouped.append({"tag": tag, "items": items})
+            tab_data[tab][label] = {"tag_groups": grouped}
 
     html = BROWSE_HTML_HEAD
     selected_tab = request.args.get("tab", "编译论点")
@@ -1030,27 +1076,31 @@ def browse():
                         e["rel"], _html_escape(e["title"]), badge_html, _time_ago(e["mtime"]))
                     html += '<div class="card-group">%s</div>' % card_html
         else:
-            groups = ld["groups"]
-            total = len(groups)
+            tag_groups = ld["tag_groups"]
+            total = sum(len(tg["items"]) for tg in tag_groups)
             html += '<div class="section"><h2>%s<span class="count">%d篇</span></h2>' % (short_label, total)
-            if not groups:
+            if not tag_groups:
                 html += '<div class="empty">（无文件）</div>'
             else:
-                for g in groups:
-                    color = random.choice(CARD_COLORS)
-                    html += '<div class="card-group">'
-                    if g["refined"]:
-                        e = g["refined"]
-                        preview_html = ''
-                        if e["preview"]:
-                            preview_html = '<div class="card-preview">%s</div>' % _html_escape(e["preview"])
-                        html += '<a href="/view/%s" class="card refined" data-type="refined" style="border-left-color:%s"><div class="card-title">✨ %s <span class="badge badge-refined" style="color:%s;background:%s1a">精炼</span></div>%s<div class="card-meta">%s</div></a>' % (
-                            e["rel"], color, _html_escape(e["title"]), color, color, preview_html, _time_ago(e["mtime"]))
-                    if g["original"]:
-                        e = g["original"]
-                        html += '<a href="/view/%s" class="card original" data-type="original"><div class="card-title">%s</div><div class="card-meta">%s</div></a>' % (
-                            e["rel"], _html_escape(e["title"]), _time_ago(e["mtime"]))
-                    html += '</div>'
+                for tg in tag_groups:
+                    tag = tg["tag"]
+                    tag_display = TAG_LABEL.get(tag, "未分类")
+                    html += '<h3 class="tag-header">%s <span class="count">%d篇</span></h3>' % (tag_display, len(tg["items"]))
+                    for g in tg["items"]:
+                        color = random.choice(CARD_COLORS)
+                        html += '<div class="card-group">'
+                        if g["refined"]:
+                            e = g["refined"]
+                            preview_html = ''
+                            if e["preview"]:
+                                preview_html = '<div class="card-preview">%s</div>' % _html_escape(e["preview"])
+                            html += '<a href="/view/%s" class="card refined" data-type="refined" style="border-left-color:%s"><div class="card-title">✨ %s <span class="badge badge-refined" style="color:%s;background:%s1a">%s</span></div>%s<div class="card-meta">%s</div></a>' % (
+                                e["rel"], color, _html_escape(e["title"]), color, color, tag_display, preview_html, _time_ago(e["mtime"]))
+                        if g["original"]:
+                            e = g["original"]
+                            html += '<a href="/view/%s" class="card original" data-type="original"><div class="card-title">%s</div><div class="card-meta">%s</div></a>' % (
+                                e["rel"], _html_escape(e["title"]), _time_ago(e["mtime"]))
+                        html += '</div>'
             html += '</div>'
 
     html += '</div>'

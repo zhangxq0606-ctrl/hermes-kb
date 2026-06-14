@@ -274,6 +274,28 @@ def extract_meta(filepath):
     return title, preview
 
 
+def _extract_tag(filepath):
+    try:
+        with open(filepath, "r", encoding="utf-8", errors="replace") as f:
+            for line in f:
+                m = re.match(r'>\s*标签:\s*(\S+)', line.strip())
+                if m:
+                    return m.group(1)
+    except Exception:
+        pass
+    return None
+
+
+TAG_LABEL = {
+    "principle": "认知/方法论",
+    "tool": "工具型资源",
+    "reflection": "自我反思",
+    "opinion": "观点/评论",
+    "case": "案例/复盘",
+    "reference": "参考资料",
+}
+
+
 def _is_derived_file(fn):
     """排除系统派生文件：tech_/insight_ 分裂产物和 _source_ URL冷备。"""
     name = fn[:-3] if fn.endswith(".md") else fn
@@ -345,11 +367,14 @@ def discover_docs():
             if os.path.isfile(refined_path):
                 title, preview = extract_meta(refined_path)
                 mtime = os.path.getmtime(refined_path)
+                tag_raw = _extract_tag(refined_path)
+                tag_display = TAG_LABEL.get(tag_raw, "精炼") if tag_raw else "精炼"
                 group = {
                     "slug": slug,
                     "title": title,
                     "preview": preview,
                     "mtime": mtime,
+                    "tag": tag_display,
                     "refined": {
                         "filepath": refined_path,
                         "rel_url": f"/detail/{key}/{slug}.html",
@@ -496,7 +521,7 @@ def generate_browse(docs):
                     if g.get("preview"):
                         preview_html = '<div class="card-preview">%s</div>' % html_escape(g["preview"])
                     list_html += f"""<a class="card card-refined" href="{d['rel_url']}" style="border-left-color:{color}">
-  <div class="card-title">✨ {html_escape(g['title'])} <span class="badge badge-refined" style="color:{color};background:{color}1a">精炼</span></div>
+  <div class="card-title">✨ {html_escape(g['title'])} <span class="badge badge-refined" style="color:{color};background:{color}1a">{g.get('tag', '精炼')}</span></div>
   {preview_html}
   <div class="card-meta">{_time_str(g['mtime'])}</div>
 </a>"""
