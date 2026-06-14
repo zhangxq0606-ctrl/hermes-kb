@@ -245,6 +245,13 @@ def extract_meta(filepath):
     except Exception:
         return title, preview
 
+    # 优先使用 # 标题作为 title
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("# ") and not stripped.startswith("##"):
+            title = stripped[2:].strip()
+            break
+
     for i, line in enumerate(lines):
         stripped = line.strip()
         if stripped.startswith("🎯"):
