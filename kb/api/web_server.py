@@ -585,6 +585,8 @@ nav a:hover { text-decoration: underline; }
 .answer-editor textarea:focus { border-color: #2563eb; }
 .answer-editor .actions { display: flex; gap: 8px; margin-top: 10px; }
 .answer-editor .cancel-btn { padding: 8px 20px; background: #f3f4f6; color: #6b7280; border: none; border-radius: 6px; font-size: 14px; cursor: pointer; }
+.discard-btn { padding: 6px 16px; background: #dc2626; color: #fff; border: none; border-radius: 6px; font-size: 13px; cursor: pointer; margin-top: 12px; }
+.discard-btn:hover { background: #b91c1c; }
 .answer-badge { display: inline-block; font-size: 12px; font-weight: 600; color: #16a34a; background: #f0fdf4; padding: 2px 8px; border-radius: 8px; }
 .wikilink { color: #7c3aed; border-bottom: 1px dashed #c4b5fd; text-decoration: none; } .wikilink:hover { color: #6d28d9; border-bottom-style: solid; }
 @media (max-width: 640px) { .answer-editor textarea { min-height: 144px; } }
@@ -609,6 +611,9 @@ nav a:hover { text-decoration: underline; }
       <button class="answer-btn" onclick="saveAnswer()">保存</button>
       <button class="cancel-btn" onclick="hideEditor()">取消</button>
     </div>
+  </div>
+  <div>
+    <button class="discard-btn" onclick="discardQuestion()">丢弃问题</button>
   </div>
 </div>
 </div>
@@ -637,6 +642,19 @@ function saveAnswer() {
     else { alert('保存失败'); }
   })
   .catch(function() { alert('保存失败'); });
+}
+function discardQuestion() {
+  if (!confirm('确认丢弃该问题？此操作不可撤销。')) return;
+  fetch('/question/discard', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({path: answerFilePath})
+  }).then(function(r) { return r.json(); })
+  .then(function(d) {
+    if (d.ok) { window.location.href = '/browse'; }
+    else { alert('丢弃失败'); }
+  })
+  .catch(function() { alert('丢弃失败'); });
 }
 </script>
 </html>"""
@@ -1076,25 +1094,50 @@ def answer_save():
     with open(full, "w", encoding="utf-8") as f:
         f.write(raw)
 
-    title, _ = _extract_meta(full)
-    title = title or os.path.basename(full).replace(".md", "")
-
-    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    inbox_dir = os.path.join(BASE_DIR, "inbox")
-    os.makedirs(inbox_dir, exist_ok=True)
-    inbox_fp = os.path.join(inbox_dir, "answer_%s.md" % ts)
-
-    inbox_content = "# [回答] %s\n" % title
-    inbox_content += "> 源问题: [%s](%s)\n" % (title, os.path.basename(full))
-    inbox_content += "> 回答时间: %s\n" % datetime.now().strftime("%Y-%m-%d %H:%M")
-    inbox_content += "\n"
-    inbox_content += answer_content
-    inbox_content += "\n"
-
-    with open(inbox_fp, "w", encoding="utf-8") as f:
-        f.write(inbox_content)
-
     return jsonify({"ok": True, "answered": True})
+
+
+@app.route("/question/discard", methods=["POST"])
+def question_discard():
+    data = request.get_json(silent=True)
+    if not data or "path" not in data:
+        return jsonify({"ok": False, "error": "缺少参数"}), 400
+
+    rel_path = data["path"]
+    full = os.path.normpath(os.path.join(BASE_DIR, rel_path))
+    question_dir = os.path.normpath(os.path.join(BASE_DIR, "core", "question"))
+
+    if not full.startswith(question_dir + os.sep):
+        return jsonify({"ok": False, "error": "只能删除 core/question/ 下的文件"}), 403
+    if not os.path.isfile(full):
+        return jsonify({"ok": False, "error": "文件不存在"}), 404
+
+    os.remove(full)
+
+    filename = os.path.basename(rel_path)
+    state_path = os.path.join(BASE_DIR, "logs", ".weekly_scan_state.json")
+    if os.path.isfile(state_path):
+        try:
+            with open(state_path, "r", encoding="utf-8") as f:
+                state = json.load(f)
+            changed = False
+            for zone in ("active", "backlog"):
+                items = state.get(zone, [])
+                state[zone] = [it for it in items if it.get("file") != filename]
+                if len(state[zone]) != len(items):
+                    changed = True
+            qfiles = state.get("question_files", {})
+            keys_to_del = [k for k in qfiles.keys() if k == filename]
+            for k in keys_to_del:
+                del qfiles[k]
+                changed = True
+            if changed:
+                with open(state_path, "w", encoding="utf-8") as f:
+                    json.dump(state, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+
+    return jsonify({"ok": True})
 
 
 @app.route("/view/<path:filepath>")
