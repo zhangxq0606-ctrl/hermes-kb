@@ -258,6 +258,16 @@ def extract_meta(filepath):
     except Exception:
         return title, preview
 
+    # Strip YAML frontmatter before scanning for title and preview
+    if lines and lines[0].strip() == "---":
+        end = -1
+        for j in range(1, len(lines)):
+            if lines[j].strip() == "---":
+                end = j
+                break
+        if end != -1:
+            lines = lines[end + 1:]
+
     # 优先使用 # 标题作为 title
     for line in lines:
         stripped = line.strip()
@@ -281,7 +291,7 @@ def extract_meta(filepath):
     if not preview:
         for line in lines:
             stripped = line.strip()
-            if stripped and not stripped.startswith("#") and not stripped.startswith("```") and not stripped.startswith("🎯") and not stripped.startswith("🗺️") and not stripped.startswith("📦"):
+            if stripped and not stripped.startswith("#") and not stripped.startswith("```") and not stripped.startswith("🎯") and not stripped.startswith("🗺️") and not stripped.startswith("📦") and not stripped.startswith("---"):
                 preview = stripped[:120]
                 break
     return title, preview
