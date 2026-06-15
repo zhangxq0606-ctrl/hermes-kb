@@ -6,6 +6,8 @@ related:
   title: 红绿灯
 - file: 不要说给我一个机会
   title: 不要说给我一个机会
+- file: test_pipeline_20260615
+  title: test_pipeline_20260615
 ---
 
 🎯 【一句话洞察】
