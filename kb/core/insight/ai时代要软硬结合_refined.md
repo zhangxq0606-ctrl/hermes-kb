@@ -4,6 +4,8 @@ related:
   title: test_财商投资笔记
 - file: 红绿灯
   title: 红绿灯
+- file: 不要说给我一个机会
+  title: 不要说给我一个机会
 ---
 
 🎯 【一句话洞察】

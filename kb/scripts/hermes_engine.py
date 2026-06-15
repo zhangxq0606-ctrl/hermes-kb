@@ -592,7 +592,12 @@ def main():
         dst = os.path.join(PROCESSING, filename)
         shutil.move(src, dst)
         log(f"MOVE_INBOX {filename} -> processing")
-        processed += 1
+
+    # ---- Step 1.5: Count all files in processing (new + retry) ----
+    for entry in os.listdir(PROCESSING):
+        fp = os.path.join(PROCESSING, entry)
+        if os.path.isfile(fp) and (entry.endswith(".md") or entry.endswith(".txt")):
+            processed += 1
 
     if processed == 0:
         log("ENGINE: inbox empty, nothing to process")
