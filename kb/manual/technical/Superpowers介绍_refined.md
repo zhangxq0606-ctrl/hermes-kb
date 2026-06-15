@@ -1,3 +1,9 @@
+---
+related:
+- file: test_token_count
+  title: test_token_count
+---
+
 🎯 【一句话洞察】
 - Superpowers 将 AI 编程从“问答式”升级为“资深工程师式”，通过需求澄清、计划制定、分步执行三步法，让 AI 独立完成项目。
 
@@ -14,3 +20,4 @@
 [相关：会记投资市场法律](会记投资市场法律.md)
 [相关：财商的修炼](财商的修炼.md)
 > 标签: tool
+

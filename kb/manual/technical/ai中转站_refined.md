@@ -1,3 +1,9 @@
+---
+related:
+- file: test_token_count
+  title: test_token_count
+---
+
 🔧 【用途定位】
 - AI 中转站，提供 AI 工具账号合租服务的访问入口，用于管理 AI 工具合租。
 - 工具名称：Aizex，服务类型：AI 工具账号合租面板。
@@ -9,3 +15,4 @@
 > ⏱️ 时效性: medium
 
 > 标签: tool
+

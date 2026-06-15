@@ -1,3 +1,9 @@
+---
+related:
+- file: test_token_count
+  title: test_token_count
+---
+
 🔧 【用途定位】
 - 解决使用AI编程工具Codex结合Remotion插件快速生成产品介绍视频的需求，适用于需要自动化视频制作的场景，无需手动剪辑。
 
@@ -20,3 +26,4 @@
 > ⏱️ 时效性: medium
 
 > 标签: tool
+

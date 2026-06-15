@@ -1,3 +1,9 @@
+---
+related:
+- file: test_token_count
+  title: test_token_count
+---
+
 🔧 【用途定位】
 - 解决个人项目UI设计丑、缺乏审美的问题，适用于非设计师开发者快速获得专业级设计。
 - 关键工具：Claude Design、Product Design (Codex Plugin)、Open Design（开源平替）。
@@ -15,3 +21,4 @@
 > ⏱️ 时效性: medium
 
 > 标签: tool
+

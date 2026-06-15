@@ -1,3 +1,9 @@
+---
+related:
+- file: test_token_count
+  title: test_token_count
+---
+
 🔧 【用途定位】
 - 解决Windows系统终端和Shell环境体验差的问题，提供开箱即用的AI终端开发环境。
 - 关键工具：Warp（AI终端）。
@@ -12,3 +18,4 @@
 
 > ⏱️ 时效性: low
 > 标签: tool
+

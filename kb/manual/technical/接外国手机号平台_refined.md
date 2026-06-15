@@ -1,3 +1,9 @@
+---
+related:
+- file: test_token_count
+  title: test_token_count
+---
+
 🔧 【用途定位】
 - 解决注册海外服务（如AI工具、社交媒体、通讯软件）时，需要临时手机号接收短信验证码的问题。适用于需要匿名、一次性或国际号码的场景。
 
@@ -13,3 +19,4 @@
 > ⏱️ 时效性: medium
 
 > 标签: tool
+
