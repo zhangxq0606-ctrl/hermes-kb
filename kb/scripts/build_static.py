@@ -115,6 +115,19 @@ def html_escape(s):
     return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
 
 
+def _replace_md_link(slug_map):
+    """Factory: returns a replacer that converts .md links to proper static URLs."""
+    def _replacer(m):
+        text, url = m.group(1), m.group(2)
+        if url.endswith(".md"):
+            slug = url[:-3]
+            if slug_map and slug in slug_map:
+                return '<a href="%s">%s</a>' % (slug_map[slug], text)
+            return '<a href="%s.html">%s</a>' % (slug, text)
+        return '<a href="%s">%s</a>' % (url, text)
+    return _replacer
+
+
 def render_markdown(text, slug_map=None):
     lines = text.split("\n")
     out = []
@@ -217,7 +230,7 @@ def render_markdown(text, slug_map=None):
         out.append("</code></pre>")
 
     rendered = "\n".join(out)
-    rendered = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", r'<a href="\2">\1</a>', rendered)
+    rendered = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", _replace_md_link(slug_map), rendered)
     if slug_map:
         def _replace_wikilink(m):
             name = m.group(1)
