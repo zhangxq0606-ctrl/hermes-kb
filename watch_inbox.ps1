@@ -1,25 +1,31 @@
-# Hermes KB - Inbox 监控脚本
-# 监听 inbox 目录，有新文件时自动跑 pipeline + build 静态站 + git push
-# 依赖 GitHub 做中间人同步，不再需要 scp 直连服务器
+# Hermes KB - Inbox Watcher
+# Monitors inbox/ for new .md files, auto-runs pipeline + build + git push
+# Deleted old tasks: HermesAutoSync (10min), HermesKBAutoPull (10min)
 
 $scriptDir = "D:\hermes-kb"
 $inboxDir = "$scriptDir\kb\inbox"
 $python = "C:\Users\qqmin06\python-sdk\python3.13.2\python.exe"
+$logFile = "$scriptDir\kb\logs\watch_inbox.log"
 
-# 互斥锁：防止多个 watcher 实例冲突
+function logMsg($msg) {
+    $ts = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    "$ts $msg" | Out-File -FilePath $logFile -Encoding utf8 -Append
+}
+
+# Mutex lock
 $lockFile = "$scriptDir\.sync.lock"
 if (Test-Path $lockFile) {
     $lockPid = Get-Content $lockFile -ErrorAction SilentlyContinue
     $proc = Get-Process -Id $lockPid -ErrorAction SilentlyContinue
-    if ($proc) {
-        Write-Host "[watch] 已有进程(PID:$lockPid)在运行，退出"
-        exit 0
-    }
+    if ($proc) { logMsg "SKIP: another watcher running (PID:$lockPid)"; exit 0 }
 }
 $PID | Set-Content $lockFile -ErrorAction SilentlyContinue
 
-Write-Host "[watch] 开始监控 inbox: $inboxDir"
-Write-Host "[watch] 新笔记到达后将自动处理"
+# Catch-up on startup: sync anything from overnight
+logMsg "START: catching up from GitHub..."
+Set-Location $scriptDir
+git pull origin main --rebase=false 2>&1 | Out-Null
+logMsg "START: catch-up done, watching inbox..."
 
 $watcher = New-Object System.IO.FileSystemWatcher
 $watcher.Path = $inboxDir
@@ -28,39 +34,27 @@ $watcher.IncludeSubdirectories = $false
 $watcher.EnableRaisingEvents = $true
 
 $global:lastRun = [DateTime]::MinValue
+$py = $python
+$dir = $scriptDir
 
 $action = {
     $now = Get-Date
-    # 防抖 60 秒
     if (($now - $global:lastRun).TotalSeconds -lt 60) { return }
     $global:lastRun = $now
-    $nowStr = $now.ToString('HH:mm:ss')
-    Write-Host "`n[$nowStr] 检测到新文件，开始处理..."
-    Set-Location $using:scriptDir
-    Write-Host "[$nowStr] 拉取 GitHub 更新..."
+    Set-Location $dir
     git pull origin main --rebase=false 2>&1 | Out-Null
-    Write-Host "[$nowStr] 执行 Pipeline..."
-    & $using:python "$using:scriptDir\kb\main.py" 2>&1 | Select-Object -Last 3 | ForEach-Object { Write-Host $_ }
-    Write-Host "[$nowStr] 重建静态站..."
-    & $using:python "$using:scriptDir\kb\scripts\build_static.py" 2>&1 | Select-Object -Last 1 | ForEach-Object { Write-Host $_ }
-    Write-Host "[$nowStr] 推送至 GitHub..."
+    & $py "$dir\kb\main.py" 2>&1 | Out-Null
+    & $py "$dir\kb\scripts\build_static.py" 2>&1 | Out-Null
     git add -A 2>&1 | Out-Null
     git diff --cached --quiet 2>&1
     if ($LASTEXITCODE -ne 0) {
         git commit -m "auto: sync $(Get-Date -Format 'yyyy-MM-dd HH:mm')" 2>&1 | Out-Null
         git push origin main 2>&1 | Out-Null
-        Write-Host "[$nowStr] 完成"
-    } else {
-        Write-Host "[$nowStr] 无变更"
     }
 }
 
 $null = Register-ObjectEvent $watcher "Created" -Action $action
 $null = Register-ObjectEvent $watcher "Renamed" -Action $action
 
-Write-Host "[watch] 就绪，等待新笔记..."
-
-try { while ($true) { Start-Sleep -Seconds 5 } }
-finally {
-    Remove-Item $lockFile -ErrorAction SilentlyContinue
-}
+try { while ($true) { Start-Sleep -Seconds 30 } }
+finally { Remove-Item $lockFile -ErrorAction SilentlyContinue }
