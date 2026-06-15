@@ -207,6 +207,11 @@ def call_ai_audit(context):
     raw = resp.read().decode("utf-8")
     data = json.loads(raw)
 
+    usage = data.get("usage", {})
+    in_tok = usage.get("prompt_tokens", "?")
+    out_tok = usage.get("completion_tokens", "?")
+    log(f"TOKENS: in={in_tok} out={out_tok}")
+
     reply = data["choices"][0]["message"]["content"].strip()
 
     if reply.startswith("```"):

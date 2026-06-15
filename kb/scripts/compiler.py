@@ -407,6 +407,10 @@ def call_ai_compile(members, tag, subgroup_idx, today):
     resp = urllib.request.urlopen(req, timeout=180)
     raw = resp.read().decode("utf-8")
     data = json.loads(raw)
+    usage = data.get("usage", {})
+    in_tok = usage.get("prompt_tokens", "?")
+    out_tok = usage.get("completion_tokens", "?")
+    print(f"[COMPILER] TOKENS: in={in_tok} out={out_tok}")
     return data["choices"][0]["message"]["content"].strip()
 
 
