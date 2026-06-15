@@ -1,4 +1,4 @@
-﻿# Hermes KB 自动同步脚本
+# Hermes KB 自动同步脚本
 # 服务器->本地用 scp，本地运行管线后回推到服务器 + GitHub
 
 $ErrorActionPreference = "Continue"
@@ -24,7 +24,7 @@ try {
 
     # 0) 从服务器拉取 Claude Code 写的文件（检查文件更新时间）
     Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] 拉取服务器文件..."
-    $serverDirs = @('/var/www/hermes-kb/kb/writing', '/var/www/hermes-kb/kb/core/insight', '/var/www/hermes-kb/kb/core/note', '/var/www/hermes-kb/kb/manual/technical')
+    $serverDirs = @('/var/www/hermes-kb/kb/writing', '/var/www/hermes-kb/kb/core/insight', '/var/www/hermes-kb/kb/core/note', '/var/www/hermes-kb/kb/manual/technical', '/var/www/hermes-kb/kb/core/question')
     $sshKey = "C:\Users\qqmin06\.ssh\trae_deploy_key"
     $sshOpts = "-i $sshKey -o StrictHostKeyChecking=no"
     $serverHost = "116.62.220.41"

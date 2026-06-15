@@ -123,6 +123,34 @@ def extract_insight(content):
     return content[:150].replace("\n", " ").strip()
 
 
+def collect_answered_questions():
+    """Read answered questions from core/question/ and return formatted context."""
+    if not os.path.isdir(CORE_QUESTION):
+        return ""
+    parts = []
+    for fn in sorted(os.listdir(CORE_QUESTION)):
+        if not fn.endswith(".md"):
+            continue
+        fp = os.path.join(CORE_QUESTION, fn)
+        try:
+            with open(fp, "r", encoding="utf-8", errors="replace") as f:
+                content = f.read()
+        except Exception:
+            continue
+        # Extract question title
+        title_match = re.search(r"^#\s*(.+)$", content, re.MULTILINE)
+        title = title_match.group(1) if title_match else fn
+        # Extract answer from ## 我的思考
+        answer_match = re.search(r"## 我的思考\s*\n\s*\n(.+?)(?:\n##|\Z)", content, re.DOTALL)
+        answer = answer_match.group(1).strip() if answer_match else ""
+        if not answer:
+            continue  # skip unanswered questions
+        parts.append(f"- 问题: {title}\n  你的回答: {answer[:200]}")
+    if not parts:
+        return ""
+    return "\n\n=== 你的历史问答记录 ===\n" + "\n".join(parts)
+
+
 def build_context(files):
     parts = []
     for mtime, fp, scan_dir in files:
@@ -137,6 +165,11 @@ def build_context(files):
             parts.append(f"- [{rel_dir}] {filename}: {insight}")
         except Exception:
             pass
+
+    # Append answered questions as context
+    qa_context = collect_answered_questions()
+    if qa_context:
+        parts.append(qa_context)
 
     if not parts:
         return "=== (empty) ===\n本周暂无新入库笔记。请基于通用技术趋势生成探索性问题。\n"
