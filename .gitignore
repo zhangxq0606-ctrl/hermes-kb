@@ -24,3 +24,7 @@ kb/inbox/.stfolder/
 
 # 运行时锁文件
 .sync.lock
+
+# 服务器 CC 指令（本地不共用）
+CLAUDE.md
+.claude/
