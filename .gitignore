@@ -13,10 +13,14 @@ public/
 .DS_Store
 
 # 密钥和自动生成文件
-kb/.env
+.env
 kb/api/index_cache.json
 kb/raw/*_source_*.md
 
 # Syncthing 元数据
 .stfolder/
+.stversions/
 kb/inbox/.stfolder/
+
+# 运行时锁文件
+.sync.lock
