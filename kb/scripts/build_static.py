@@ -633,8 +633,17 @@ def generate_detail(docs):
                 print(f"  {detail_path}")
 
 
+def _strip_frontmatter(text):
+    """Strip YAML frontmatter (--- ... ---) from the beginning of a markdown file."""
+    if text.startswith("---"):
+        end = text.find("---", 3)
+        if end != -1:
+            return text[end + 3:].lstrip()
+    return text
+
+
 def _render_detail_markdown(text, slug_map=None):
-    rendered = render_markdown(text, slug_map=slug_map)
+    rendered = render_markdown(_strip_frontmatter(text), slug_map=slug_map)
     rendered = rendered.replace(
         '<a href="',
         '<a target="_blank" rel="noopener" href="'
