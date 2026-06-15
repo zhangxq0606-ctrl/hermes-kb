@@ -1,6 +1,6 @@
 # Hermes KB - Inbox Watcher
-# Monitors inbox/ for new .md files, auto-runs pipeline + build + git push
-# Also triggers full pipeline (Weekly Scan + Compiler) once per week
+# Monitors inbox/ for new .md files, auto-runs engine + build + git push
+# Weekly: triggers full pipeline (engine + weekly scan + compiler)
 
 $scriptDir = "D:\hermes-kb"
 $inboxDir = "$scriptDir\kb\inbox"
@@ -13,18 +13,26 @@ function logMsg($msg) {
     "$ts $msg" | Out-File -FilePath $logFile -Encoding utf8 -Append
 }
 
-function runPipeline {
+function gitSync {
     git pull origin main --rebase=false 2>&1 | Out-Null
-    & $py "$dir\kb\main.py" 2>&1 | Out-Null
-    & $py "$dir\kb\scripts\build_static.py" 2>&1 | Out-Null
     git add -A 2>&1 | Out-Null
     git diff --cached --quiet 2>&1
     if ($LASTEXITCODE -ne 0) {
         git commit -m "auto: sync $(Get-Date -Format 'yyyy-MM-dd HH:mm')" 2>&1 | Out-Null
         git push origin main 2>&1 | Out-Null
     }
-    # Record last full scan time
-    Get-Date -Format "yyyy-MM-dd" | Out-File $scanStateFile -Encoding utf8
+}
+
+function runEngineOnly {
+    # Only process inbox files: engine + build + push
+    & $py "$dir\kb\scripts\hermes_engine.py" 2>&1 | Out-Null
+    & $py "$dir\kb\scripts\build_static.py" 2>&1 | Out-Null
+}
+
+function runFullPipeline {
+    # Full pipeline: engine + index_guard + weekly_scan + compiler + build
+    & $py "$dir\kb\main.py" 2>&1 | Out-Null
+    & $py "$dir\kb\scripts\build_static.py" 2>&1 | Out-Null
 }
 
 # Mutex lock
@@ -53,28 +61,29 @@ $watcher.IncludeSubdirectories = $false
 $watcher.EnableRaisingEvents = $true
 
 $global:lastRun = [DateTime]::MinValue
-$global:lastWeeklyCheck = (Get-Date).AddDays(-7)  # force first weekly check on startup
 
-# Register inbox event handlers
 $action = {
     $now = Get-Date
     if (($now - $global:lastRun).TotalSeconds -lt 60) { return }
     $global:lastRun = $now
     Set-Location $dir
-    runPipeline
+    logMsg "INBOX: new files detected, running engine..."
+    runEngineOnly
+    gitSync
+    logMsg "INBOX: done"
 }
 
 $null = Register-ObjectEvent $watcher "Created" -Action $action
 $null = Register-ObjectEvent $watcher "Renamed" -Action $action
 
-logMsg "Ready. Watching inbox + weekly scan check every 30s..."
+logMsg "Ready. Inbox trigger -> engine only. Weekly full scan every 7 days."
 
-# Main loop: wait for events AND check weekly scan
+# Main loop: inbox events + weekly check
 try {
     while ($true) {
         Start-Sleep -Seconds 30
 
-        # Weekly scan check: has it been 7+ days?
+        # Weekly scan check
         $today = Get-Date
         $lastScan = if (Test-Path $scanStateFile) {
             Get-Date (Get-Content $scanStateFile -Raw).Trim()
@@ -82,10 +91,12 @@ try {
             $today.AddDays(-8)
         }
         if (($today - $lastScan).TotalDays -ge 7) {
-            logMsg "WEEKLY: 7+ days since last full scan, triggering pipeline..."
+            logMsg "WEEKLY: 7+ days since last full scan, running full pipeline..."
             Set-Location $dir
-            runPipeline
-            logMsg "WEEKLY: full scan done"
+            runFullPipeline
+            gitSync
+            Get-Date -Format "yyyy-MM-dd" | Out-File $scanStateFile -Encoding utf8
+            logMsg "WEEKLY: full pipeline done"
         }
     }
 }
