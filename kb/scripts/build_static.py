@@ -647,12 +647,16 @@ def generate_detail(docs):
 
 
 def _strip_frontmatter(text):
-    """Strip YAML frontmatter (--- ... ---) from the beginning of a markdown file."""
+    """Strip YAML frontmatter (--- ... ---) and first # heading from markdown."""
     if text.startswith("---"):
         end = text.find("---", 3)
         if end != -1:
-            return text[end + 3:].lstrip()
-    return text
+            text = text[end + 3:].lstrip()
+    # Strip the first # heading (page header already shows the title)
+    lines = text.split("\n")
+    while lines and lines[0].strip().startswith("# "):
+        lines.pop(0)
+    return "\n".join(lines).strip()
 
 
 def _render_detail_markdown(text, slug_map=None):
